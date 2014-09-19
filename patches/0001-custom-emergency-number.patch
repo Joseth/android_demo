@@ -1,0 +1,1055 @@
+From 6a2e62caf487b06da2fb3817ad6e172c7fdfbcaf Mon Sep 17 00:00:00 2001
+From: joseth.li <joseth.li@dewav.com>
+Date: Thu, 23 Jan 2014 09:54:04 +0800
+Subject: [PATCH] custom emergency number
+
+Change-Id: I25f3f31a47ce52613173a9c91ce2f5afee582d1d
+---
+ .../internal/telephony/TelephonyProperties.java    |    6 +
+ .../com/android/internal/telephony/MccTable.java   |   14 +
+ .../internal/telephony/ServiceStateTracker.java    |    4 +
+ .../telephony/gsm/GsmServiceStateTracker.java      |   43 +++
+ .../mediatek/op/telephony/EmergencyNumberUtil.java |  263 +++++++++++++++
+ .../com/mediatek/op/telephony/PhoneNumberExt.java  |   73 +-----
+ modem/custom/modem/common/custom_ecc.c             |  333 ++++++++++++++++----
+ modem/custom/modem/common/ps/customer_at_command.c |   32 ++
+ modem/custom/modem/common/ps/lmmi_ind.c            |   12 +-
+ .../src/com/android/phone/CallController.java      |    8 +-
+ 10 files changed, 649 insertions(+), 139 deletions(-)
+ create mode 100644 mediatek/frameworks/base/op/java/com/mediatek/op/telephony/EmergencyNumberUtil.java
+
+diff --git a/frameworks/base/telephony/java/com/android/internal/telephony/TelephonyProperties.java b/frameworks/base/telephony/java/com/android/internal/telephony/TelephonyProperties.java
+index c3c0b23..f52b70f 100755
+--- a/frameworks/base/telephony/java/com/android/internal/telephony/TelephonyProperties.java
++++ b/frameworks/base/telephony/java/com/android/internal/telephony/TelephonyProperties.java
+@@ -322,4 +322,10 @@ public interface TelephonyProperties
+     static final String PROPERTY_PROJECT = "gsm.project.baseband";
+     static final String PROPERTY_PROJECT_2 = "gsm.project.baseband.2";
+ 
++    /**
++     * Added by Joseth
++     *
++     * @hide 
++     */
++    static String PROPERTY_ICC_OPERATOR_NUMERIC_LIMIT = "gsm.sim.operator.numeric.limit"; // Added by Joseth
+ }
+diff --git a/frameworks/opt/telephony/src/java/com/android/internal/telephony/MccTable.java b/frameworks/opt/telephony/src/java/com/android/internal/telephony/MccTable.java
+index 2f0429a..7bd826b 100755
+--- a/frameworks/opt/telephony/src/java/com/android/internal/telephony/MccTable.java
++++ b/frameworks/opt/telephony/src/java/com/android/internal/telephony/MccTable.java
+@@ -638,4 +638,18 @@ public final class MccTable
+ 
+         Collections.sort(table);
+     }
++
++    /**
++     * Added by Joseth
++     *
++     * @hide 
++     */
++    public static int getMCCForCountryCode(String countryIso) {
++        for(MccEntry entry : table) {
++            if (entry.iso.compareToIgnoreCase(countryIso) == 0)
++                return entry.mcc;
++        }
++
++        return 0;
++    }
+ }
+diff --git a/frameworks/opt/telephony/src/java/com/android/internal/telephony/ServiceStateTracker.java b/frameworks/opt/telephony/src/java/com/android/internal/telephony/ServiceStateTracker.java
+index b490b2e..e227f7d 100755
+--- a/frameworks/opt/telephony/src/java/com/android/internal/telephony/ServiceStateTracker.java
++++ b/frameworks/opt/telephony/src/java/com/android/internal/telephony/ServiceStateTracker.java
+@@ -214,6 +214,10 @@ public abstract class ServiceStateTracker extends Handler {
+     protected static final int EVENT_GET_SIM_RECOVERY_ON = 108;
+     /** MTK added events end*/
+ 
++    /* Added by Dewav/Joseth@{ */
++    protected static final int EVENT_QUERY_LIMITED_SERVICE_PLMN = 150;
++    /* @} */
++
+     /** VIA added events begin*/
+     protected static final int EVENT_QUERY_NITZ_TIME = 200;
+     protected static final int EVENT_GET_NITZ_TIME = 201;
+diff --git a/frameworks/opt/telephony/src/java/com/android/internal/telephony/gsm/GsmServiceStateTracker.java b/frameworks/opt/telephony/src/java/com/android/internal/telephony/gsm/GsmServiceStateTracker.java
+index b413042..b6a1a7f 100755
+--- a/frameworks/opt/telephony/src/java/com/android/internal/telephony/gsm/GsmServiceStateTracker.java
++++ b/frameworks/opt/telephony/src/java/com/android/internal/telephony/gsm/GsmServiceStateTracker.java
+@@ -917,6 +917,15 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
+                 }
+                 log("EVENT_DISABLE_EMMRRS_STATUS end");
+                 break;
++            // Added by Joseth @{
++            case EVENT_QUERY_LIMITED_SERVICE_PLMN:
++                ar = (AsyncResult)msg.obj;
++                log("EVENT_QUERY_LIMITED_SERVICE_PLMN: " + ar.result);
++                if (ar.exception == null) {
++                    handleLimitServicePlmn(ar);
++                }
++                break;
++            // @}
+             default:
+                 super.handleMessage(msg);
+             break;
+@@ -1580,6 +1589,12 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
+         // this new state has been applied - forget it until we get a new new state
+         mNewRilRadioTechnology = 0;
+ 
++        // Added by Joseth @{
++        if (mEmergencyOnly && cm.getRadioState().isOn()) {
++            queryLimitServicePlmn();
++        }
++        // @}
++        
+         //newSS.setStateOutOfService(); // clean slate for next time
+ 
+         if (hasRegistered) {
+@@ -3448,4 +3463,32 @@ final class GsmServiceStateTracker extends ServiceStateTracker {
+         return currentDataConnectionSimId;
+     }
+     //MTK-END [MTK80515] [ALPS00368272]
++
++    // Added by Joseth @{
++    private void queryLimitServicePlmn() {
++        Log.d("GsmServiceStateTracker", "queryLimitServicePlmn ...");
++        
++        String []atCmd = new String[] {"AT+GPLMN?", "+GPLMN"};
++        cm.invokeOemRilRequestStrings(atCmd, obtainMessage(EVENT_QUERY_LIMITED_SERVICE_PLMN));
++    }
++
++    private void handleLimitServicePlmn(AsyncResult ar) {
++        String[] result = (String[]) ar.result;
++        String plmn = result[0];
++        final String PREFIX = "GPLMN:";
++    
++        Log.d("GsmServiceStateTracker", "handleLimitServicePlmn: plmn = " + plmn);
++
++        try {
++            String mccmnc = plmn.substring(PREFIX.length());
++            Log.d("GsmServiceStateTracker", "handleLimitServicePlmn: mccmnc = " + mccmnc);
++            
++            SystemProperties.set(
++                TelephonyProperties.PROPERTY_ICC_OPERATOR_NUMERIC_LIMIT, mccmnc);
++        } catch (Exception ex) {
++            ex.printStackTrace();
++            Log.e("GsmServiceStateTracker", "can not write PROPERTY_ICC_OPERATOR_NUMERIC_LIMIT");
++        }
++    }
++    // @}
+ }
+diff --git a/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/EmergencyNumberUtil.java b/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/EmergencyNumberUtil.java
+new file mode 100644
+index 0000000..9ccedfc
+--- /dev/null
++++ b/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/EmergencyNumberUtil.java
+@@ -0,0 +1,263 @@
++package com.mediatek.op.telephony;
++
++import java.util.Locale;
++import android.util.Log;
++import android.text.TextUtils;
++import android.os.ServiceManager;
++import android.os.SystemProperties;
++import android.content.Context;
++import com.android.internal.telephony.ITelephony;
++import com.android.internal.telephony.MccTable;
++import com.android.internal.telephony.PhoneConstants;
++import com.android.internal.telephony.TelephonyProperties;
++
++/**
++ * @hide 
++ */
++public class EmergencyNumberUtil {
++    private static final String TAG = "EmergencyNumberUtil";
++    
++	/* MCC numbers */
++	private static final int MCC_INVALIDATE = 0;
++	
++	private static final String COUNTRY_CODE_IN = "IN"; /* India */
++	private static final int MCC_IN_01 = 404;
++	private static final int MCC_IN_02 = 405;
++	private static final int MCC_IN_03 = 406;
++	private static final String COUNTRY_CODE_RU = "RU"; /* Russia */
++	private static final int MCC_RU = 250;
++	private static final String COUNTRY_CODE_PH = "PH"; /* Philippines */
++	private static final int MCC_PH = 515;
++	private static final String COUNTRY_CODE_BD = "BD"; /* Bangladesh */
++	private static final int MCC_BD = 470;
++	private static final String COUNTRY_CODE_ID = "ID"; /* Indonesia */
++	private static final int MCC_ID = 510;
++	private static final String COUNTRY_CODE_VN = "VN"; /* Vietnam */
++	private static final int MCC_VN = 452;
++	private static final String COUNTRY_CODE_TH = "TH"; /* Thailand */
++	private static final int MCC_TH = 520;
++	private static final String COUNTRY_CODE_PY = "PY"; /* Paraguay */
++	private static final int MCC_PY = 744;
++	private static final String COUNTRY_CODE_BR = "BR"; /* Brazil */
++	private static final int MCC_BR = 724;
++	private static final String COUNTRY_CODE_PK = "PK"; /* Pakistan */
++	private static final int MCC_PK = 410;
++	private static final String COUNTRY_CODE_MX = "MX"; /* Mexico */
++	private static final int MCC_MX = 334;
++	private static final String COUNTRY_CODE_CN = "CN"; /* China */
++	private static final int MCC_CN_01 = 460;
++	private static final int MCC_CN_02 = 461;
++	/* STEP 1/3: Add other MCC(s) */
++
++	private static int mGeminiSimNum = PhoneConstants.GEMINI_SIM_NUM;
++	
++	public static int getSimMCC(int simId) {
++		
++		try {
++			ITelephony tel = ITelephony.Stub.asInterface(ServiceManager.getService(Context.TELEPHONY_SERVICE));
++			if (tel != null) {
++				String mccmnc = tel.getSimOperator(simId);
++				String mcc = mccmnc.substring(0, 3);
++				return Integer.parseInt(mcc);
++			}
++		} catch (Exception ex) {
++			ex.printStackTrace();
++		}
++		
++		return MCC_INVALIDATE;
++	}
++    private static int getLimitMCC() {
++        try {
++            String numeric = SystemProperties.get(
++                TelephonyProperties.PROPERTY_ICC_OPERATOR_NUMERIC_LIMIT);
++            Log.d(TAG, "getLimitMCC, numeric = " + numeric);
++            
++            if (!TextUtils.isEmpty(numeric) && numeric.length() >= 4) {
++                int mcc = Integer.parseInt(numeric.substring(0, 3));
++
++                return mcc;
++            }
++        } catch (Exception ex) {
++            ex.printStackTrace();
++        }
++
++        return MCC_INVALIDATE;
++    }
++
++    private static int getDefaultCountryMCC() {
++        String countryIso = Locale.getDefault().getCountry();
++
++        return MccTable.getMCCForCountryCode(countryIso);        
++    }
++
++    private static int getCurrentMCC() {
++        int mcc;
++
++        /* Firstly, get mcc from SIM(s) */
++        for (int i = 0; i < mGeminiSimNum; i++) {
++            mcc = getSimMCC(i);
++            if (mcc != MCC_INVALIDATE) {
++                Log.d(TAG, "getCurrentMCC from SIM[" + i + "], mcc = " + mcc);
++                return mcc;
++            }
++        }
++        
++        /* Secondly, get mcc from limit network */
++        mcc = getLimitMCC();
++        if (mcc != MCC_INVALIDATE) {
++            Log.d(TAG, "getCurrentMCC from limitnetwork, mcc = " + mcc);
++            return mcc;
++        }
++        
++        /* finally, get mcc from default country */
++        mcc = getDefaultCountryMCC();
++        Log.d(TAG, "getCurrentMCC from default country, mcc = " + mcc);
++
++        return mcc;
++    }
++    
++
++	private static boolean isMatch(final String [] numList, String number) {
++        String plusNumber = null;
++        String numberPlus = null;
++		final int len = numList.length;
++		
++		for (int i = 0; i < len; i++) {
++			plusNumber = "+" + numList[i];
++			numberPlus = numList[i] + "+";
++			if (numList[i].equals(number)
++				|| plusNumber.equals(number)
++				|| (number.startsWith(numberPlus) && !number.contains("*") && !number.contains("#"))) {
++				return true;
++			}
++		}
++		
++		return false;
++	}
++	
++    public static int countryIso2MCC(final String countryIso) {
++        int mcc = MCC_INVALIDATE;
++        
++        if (TextUtils.isEmpty(countryIso)) 
++            mcc = MCC_INVALIDATE;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_IN))
++            mcc = MCC_IN_01;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_RU))
++            mcc = MCC_RU;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_PH))
++            mcc = MCC_PH;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_BD))
++            mcc = MCC_BD;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_ID))
++            mcc = MCC_ID;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_VN))
++            mcc = MCC_VN;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_TH))
++            mcc = MCC_TH;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_PY))
++            mcc = MCC_PY;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_BR))
++            mcc = MCC_BR;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_PK))
++            mcc = MCC_PK;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_MX))
++            mcc = MCC_MX;
++        else if (countryIso.equalsIgnoreCase(COUNTRY_CODE_CN))
++            mcc = MCC_CN_01;
++        /* STEP 2/3: Add other country code */
++        
++		Log.d(TAG, "\t countryIso = " + countryIso + ", mcc = " + mcc);
++
++        return mcc;
++    }
++    
++	/** 
++	 * mcc: Mobile country code: http://en.wikipedia.org/wiki/Mobile_country_code
++	 * number: 
++	 * special: true: ECC only if no SIM card
++	 * 			false: ECC alway
++	 * 
++	 * Emergency number: http://en.wikipedia.org/wiki/Emergency_telephone_number
++	 * */
++	public static boolean isEmergencyNumber(int mcc, String number, boolean special) {
++		String []specialNums = null;
++		String []customNums = null;
++
++		switch(mcc) {
++		case MCC_IN_01:		/* India */
++		case MCC_IN_02:
++		case MCC_IN_03:
++			specialNums = new String[]{"100", "101", "102", "108"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_RU:		/* Russia */
++			specialNums = new String[]{"01", "02", "03", "04", "001", "002", "003"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_PH:		/* Philippines */
++			specialNums = new String[]{"117", "136", "163"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_BD:		/* Bangladesh */
++			specialNums = new String[]{"999"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_ID:		/* Indonesia */
++			specialNums = new String[]{"110", "118", "119", "113", "115", "129", "123"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_VN:		/* Vietnam */
++			specialNums = new String[]{"113", "114", "115"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_TH:		/* Thailand */
++			specialNums = new String[]{"191", "199", "195"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_PY:		/* Paraguay */
++		    customNums = new String[]{"112", "911"};
++			break;
++		case MCC_BR:		/* Brazil */
++			specialNums = new String[]{"191", "194", "197", "198", "199", "100", "128"};
++			customNums = new String[]{"112", "911", "190", "192", "193"};
++			break;
++		case MCC_PK:		/* Pakistan */
++			specialNums = new String[]{"15", "115", "16"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_MX:		/* Mexico */
++			specialNums = new String[]{"066", "065", "068"};
++			customNums = new String[]{"112", "911"};
++			break;
++		case MCC_CN_01:		/* China */
++		case MCC_CN_02:
++			specialNums = new String[]{"110", "119", "122", "114", "121", "999"};
++			customNums = new String[]{"112", "911"};
++			break;
++		/* STEP 3/3: Add specialNums and customNums for other MCC(s) */
++		default:
++			specialNums = new String[]{"000", "08", "110", "118", "119", "999", "120"};
++			customNums = new String[]{"112", "911"};
++			break;
++		}
++
++		Log.d(TAG, "\t number = " + number + ", special = " + special
++		        + ", MCC = " + mcc);
++		
++		if ((specialNums != null) && isMatch(specialNums, number)) {
++		    Log.d(TAG, "\t isSpecialNum");
++			return true;
++		}
++		if ((customNums != null) && !special && isMatch(customNums, number)) {
++		    Log.d(TAG, "\t isCustomNum");
++			return true;
++		}
++		Log.d(TAG, "\t is not emergency number");
++		
++		return false;
++	}
++
++	public static boolean isEmergencyNumber(String number, boolean special) {
++	    return isEmergencyNumber(getCurrentMCC(), number, special);
++	}
++}
+diff --git a/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/PhoneNumberExt.java b/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/PhoneNumberExt.java
+index da9262a..89c1b88 100755
+--- a/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/PhoneNumberExt.java
++++ b/mediatek/frameworks/base/op/java/com/mediatek/op/telephony/PhoneNumberExt.java
+@@ -60,81 +60,12 @@ public class PhoneNumberExt implements IPhoneNumberExt {
+      *  1: ECC always
+      */
+     public boolean isCustomizedEmergencyNumber(String number, String plusNumber, String numberPlus) {        
+-        //String []emergencyNumList = {"000", "08", "110", "118", "119", "999","120"};
+-        final String []emergencyNumList = {
+-                "112", "911"
+-              , "080", "060", "066", "065", "068"           /* __MEXICO_ECC__ */
+-              , "01", "02", "03", "001", "002", "003"       /* __RUSSIA_ECC__ */
+-              , "117"                                       /* __PHILIPPINES_ECC__ */
+-              , "190", "192" , "193"                        /* __BRAZIL_ECC__ */
+-              , "15", "115", "16"                           /* __PAKISTAN_ECC__ */
+-              , "120"
+-              /* , 122 */
+-              , "999"
+-              , "000", "110", "118", "119", "08"
+-              , "100", "101", "102"                         /* __INDIA_ECC__ */
+-              /* , "118", 110 */, "113"                     /* __INDONESIA_ECC__ */
+-              , "121", "122", "123", "180", "126", "128", "129" /* __EGYPT_ECC__ */
+-              , "191"/* , "192", "193" */                   /* __GHANA_ECC__ */
+-              , "991", "992", "993"                         /* __ZAMBIA_ECC__ , Zimbabwe */
+-              , "994", "995"                                /* Zimbabwe */
+-              /* , "15"*/, "17", "18", "19"                 /* Djibouti, Chad, Mali, Morocco, etc. */
+-              , "177"                                       /* Morocco */
+-              /* , "190", "193" */, "197", "198"            /* Tunisia */
+-              /* , "100", "101" */, "107"                   /* Argentina */
+-              /* , "110", "118", "119" */                   /* Bolivia */
+-              , "131" , "132", "133"                        /* Chile */
+-              /* , "123", "132"*/, "127", "156", "165"      /* Columbia */
+-              /* , "101", "102", "131" */, "103"            /* Ecuador */
+-              , "912", "913"                                /* Guyana */
+-              /* , "100", "115", "117" */, "105", "116"     /*Peru */
+-              , "171"};                                     /* Venezuela */
+-
+-        final int eccNo = emergencyNumList.length;
+-        for (int i = 0; i < eccNo; i++) {
+-            plusNumber = "+" + emergencyNumList[i];
+-            numberPlus = emergencyNumList[i] + "+";
+-            if (emergencyNumList[i].equals(number)
+-                || plusNumber.equals(number)
+-                || (number.startsWith(numberPlus) && !number.contains("*") && !number.contains("#"))) {
+-                return true;
+-            }
+-        }
+-
+-        return false;
++        return EmergencyNumberUtil.isEmergencyNumber(number, false);
+     }
+ 
+     /* 0: ECC only if no SIM */
+     public boolean isSpecialEmergencyNumber(String dialString) {
+-        /* These special emergency numbers will show ECC in MMI but sent to nw as
+-         * normal call */
+-        return (dialString.equals("000") || dialString.equals("08")
+-              || dialString.equals("080") || dialString.equals("060")
+-              || dialString.equals("066") || dialString.equals("065")
+-              || dialString.equals("068")
+-              || dialString.equals("110") || dialString.equals("118")
+-              || dialString.equals("119") || dialString.equals("999")
+-              || dialString.equals("120")
+-              || dialString.equals("15") || dialString.equals("115")
+-              || dialString.equals("16")
+-              || dialString.equals("100") || dialString.equals("101")
+-              || dialString.equals("102") || dialString.equals("113")
+-              || dialString.equals("121") || dialString.equals("122")
+-              || dialString.equals("122") || dialString.equals("180")
+-              || dialString.equals("126") || dialString.equals("128")
+-              || dialString.equals("129") || dialString.equals("191")
+-              || dialString.equals("991") || dialString.equals("992")
+-              || dialString.equals("993") || dialString.equals("994")
+-              || dialString.equals("995") || dialString.equals("17")
+-              || dialString.equals("18")  || dialString.equals("19")
+-              || dialString.equals("177") || dialString.equals("197")
+-              || dialString.equals("198") || dialString.equals("107")
+-              || dialString.equals("131") || dialString.equals("132")
+-              || dialString.equals("133") || dialString.equals("127")
+-              || dialString.equals("156") || dialString.equals("165")
+-              || dialString.equals("103") || dialString.equals("912")
+-              || dialString.equals("913") || dialString.equals("105")
+-              || dialString.equals("116") || dialString.equals("171"));
++        return EmergencyNumberUtil.isEmergencyNumber(dialString, true);
+     }
+ 
+     public boolean isCustomizedEmergencyNumberExt(String number, String plusNumber, String numberPlus) {
+diff --git a/modem/custom/modem/common/custom_ecc.c b/modem/custom/modem/common/custom_ecc.c
+index 70b099c..52a271f 100644
+--- a/modem/custom/modem/common/custom_ecc.c
++++ b/modem/custom/modem/common/custom_ecc.c
+@@ -262,6 +262,26 @@
+ 
+ extern sim_interface_enum l4c_gemini_get_switched_sim_id(sim_interface_enum simId);
+ 
++/* MCC numbers
++ * Added by Joseth @{
++ **/
++#define MCC_IN_01 	"404"	/* India */
++#define MCC_IN_02 	"405"
++#define MCC_IN_03 	"406"
++#define MCC_RU		"250"	/* Russia */
++#define MCC_PH		"515"	/* Philippines */
++#define MCC_BD		"470"	/* Bangladesh */
++#define MCC_ID		"510"	/* Indonesia */
++#define MCC_VN 		"452"	/* Vietnam */
++#define MCC_TH 		"520"	/* Thailand */
++#define MCC_PY 		"744"	/* Paraguay */
++#define MCC_BR 		"724"	/* Brazil */
++#define MCC_PK 		"410"	/* Pakistan */
++#define MCC_MX 		"334"	/* Mexico */
++#define MCC_CN_01 	"460"	/* China */
++#define MCC_CN_02 	"461"
++/* TODO STEP 1/3: Add other MCC(s) */
++/* @} */
+ 
+ /* ECC buffers */
+ /* The last word means whether this entry should be regarded as emergency call if SIM card is present */
+@@ -271,43 +291,37 @@ const kal_uint16 ecc_default_num[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] =
+     {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
+     {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
+ 
+-//#ifdef __MEXICO_ECC__
++#ifdef __MEXICO_ECC__
+     {0x0030, 0x0038, 0x0030, 0x0000, 1}, /* 080 */
+     {0x0030, 0x0036, 0x0030, 0x0000, 1}, /* 060 */
+-    {0x0030, 0x0036, 0x0036, 0x0000, 1}, /* 066 */
+-    {0x0030, 0x0036, 0x0035, 0x0000, 1}, /* 065 */
+-    {0x0030, 0x0036, 0x0038, 0x0000, 1}, /* 068 */
+-//#endif /* __MEXICO_ECC__ */
++#endif /* __MEXICO_ECC__ */
+ 
+-//#ifdef __RUSSIA_ECC__
++#ifdef __RUSSIA_ECC__
+     {0x0030, 0x0031, 0x0000, 0x0000, 1}, /* 01  */
+     {0x0030, 0x0032, 0x0000, 0x0000, 1}, /* 02  */
+     {0x0030, 0x0033, 0x0000, 0x0000, 1}, /* 03  */
+     {0x0030, 0x0030, 0x0031, 0x0000, 1}, /* 001 */
+     {0x0030, 0x0030, 0x0032, 0x0000, 1}, /* 002 */
+     {0x0030, 0x0030, 0x0033, 0x0000, 1}, /* 003 */
+-//#endif /* __RUSSIA_ECC__ */
++#endif /* __RUSSIA_ECC__ */
+ 
+-//#ifdef __PHILIPPINES_ECC__
++#ifdef __PHILIPPINES_ECC__
+     {0x0031, 0x0031, 0x0037, 0x0000, 1}, /* 117 */
+-//#endif /* __PHILIPPINES_ECC__ */
++#endif /* __PHILIPPINES_ECC__ */
+ 
+-//#ifdef __BRAZIL_ECC__
++#ifdef __BRAZIL_ECC__
+     {0x0031, 0x0039, 0x0030, 0x0000, 1}, /* 190 */
+-    {0x0031, 0x0039, 0x0032, 0x0000, 1}, /* 192 */
+-    {0x0031, 0x0039, 0x0033, 0x0000, 1}, /* 193 */
+-//#endif /* __BRAZIL_ECC__ */
++#endif /* __BRAZIL_ECC__ */
+ 
+-//#ifdef __PAKISTAN_ECC__
++#ifdef __PAKISTAN_ECC__
+     {0x0031, 0x0035, 0x0000, 0x0000, 0}, /* 15 */
+     {0x0031, 0x0031, 0x0035, 0x0000, 0}, /* 115 */
+-    {0x0031, 0x0036, 0x0000, 0x0000, 0}, /* 16 */
+-//#endif /* __PAKISTAN_ECC__ */
++#endif /* __PAKISTAN_ECC__ */
+ 
+-//#if defined(__OP01__) || defined(__OP02__) || defined(__OP09__) || defined(__CTA_ECC_SUPPORT__)
++#if defined(__OP01__) || defined(__OP02__) || defined(__OP09__) || defined(__CTA_ECC_SUPPORT__)
+     {0x0031, 0x0032, 0x0030, 0x0000, 0}, /* 120 */
+     {0x0031, 0x0032, 0x0032, 0x0000, 0}, /* 122 */
+-//#endif
++#endif
+ 
+ #if defined(__CPHS__) && defined(__CPHS_NUM_999_AS_ECC__)
+     {0x0039, 0x0039, 0x0039, 0x0000, 1}, /* 999 */
+@@ -320,50 +334,175 @@ const kal_uint16 ecc_default_num[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] =
+     {0x0031, 0x0031, 0x0038, 0x0000, 0}, /* 118 */
+     {0x0031, 0x0031, 0x0039, 0x0000, 0}, /* 119 */
+     {0x0030, 0x0038, 0x0000, 0x0000, 0}, /* 08  */
+-//#if defined(__INDIA_ECC__)
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++// Added by Joseth @{
++const kal_uint16 ecc_num_IN[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
+     {0x0031, 0x0030, 0x0030, 0x0000, 0}, /* 100 */
+     {0x0031, 0x0030, 0x0031, 0x0000, 0}, /* 101 */
+     {0x0031, 0x0030, 0x0032, 0x0000, 0}, /* 102 */
+-//#endif
++    {0x0031, 0x0030, 0x0038, 0x0000, 0}, /* 108 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_RU[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0030, 0x0031, 0x0000, 0x0000, 0}, /* 01  */
++    {0x0030, 0x0032, 0x0000, 0x0000, 0}, /* 02  */
++    {0x0030, 0x0033, 0x0000, 0x0000, 0}, /* 03  */
++    {0x0030, 0x0034, 0x0000, 0x0000, 0}, /* 04  */
++    {0x0030, 0x0030, 0x0031, 0x0000, 0}, /* 001 */
++    {0x0030, 0x0030, 0x0032, 0x0000, 0}, /* 002 */
++    {0x0030, 0x0030, 0x0033, 0x0000, 0}, /* 003 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_PH[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0031, 0x0037, 0x0000, 0}, /* 117 */
++    {0x0031, 0x0033, 0x0036, 0x0000, 0}, /* 136 */
++    {0x0031, 0x0036, 0x0033, 0x0000, 0}, /* 163 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_BD[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0039, 0x0039, 0x0039, 0x0000, 0}, /* 999 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_ID[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0031, 0x0030, 0x0000, 0}, /* 110 */
++    {0x0031, 0x0031, 0x0038, 0x0000, 0}, /* 118 */
++    {0x0031, 0x0031, 0x0039, 0x0000, 0}, /* 119 */
+     {0x0031, 0x0031, 0x0033, 0x0000, 0}, /* 113 */
+-//#if defined(__EGYPT_ECC__)
+-    {0x0031, 0x0032, 0x0031, 0x0000, 0}, /* 121 */
+-    {0x0031, 0x0032, 0x0032, 0x0000, 0}, /* 122 */
+-    {0x0031, 0x0032, 0x0033, 0x0000, 0}, /* 123 */
+-    {0x0031, 0x0038, 0x0030, 0x0000, 0}, /* 180 */
+-    {0x0031, 0x0032, 0x0036, 0x0000, 0}, /* 126 */
+-    {0x0031, 0x0032, 0x0038, 0x0000, 0}, /* 128 */
++    {0x0031, 0x0031, 0x0035, 0x0000, 0}, /* 115 */
+     {0x0031, 0x0032, 0x0039, 0x0000, 0}, /* 129 */
+-//#endif
++    {0x0031, 0x0032, 0x0033, 0x0000, 0}, /* 123 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_VN[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0031, 0x0033, 0x0000, 0}, /* 113 */
++    {0x0031, 0x0031, 0x0034, 0x0000, 0}, /* 114 */
++    {0x0031, 0x0031, 0x0035, 0x0000, 0}, /* 115 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_TH[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
+     {0x0031, 0x0039, 0x0031, 0x0000, 0}, /* 191 */
+-    {0x0039, 0x0039, 0x0031, 0x0000, 0}, /* 991 */
+-    {0x0039, 0x0039, 0x0032, 0x0000, 0}, /* 992 */
+-    {0x0039, 0x0039, 0x0033, 0x0000, 0}, /* 993 */
+-    {0x0039, 0x0039, 0x0034, 0x0000, 0}, /* 994 */
+-    {0x0039, 0x0039, 0x0035, 0x0000, 0}, /* 995 */
+-    {0x0031, 0x0037, 0x0000, 0x0000, 0}, /* 17 */
+-    {0x0031, 0x0038, 0x0000, 0x0000, 0}, /* 18 */
+-    {0x0031, 0x0039, 0x0000, 0x0000, 0}, /* 19 */
+-    {0x0031, 0x0037, 0x0007, 0x0000, 0}, /* 177 */
+-    {0x0031, 0x0039, 0x0007, 0x0000, 0}, /* 197 */
+-    {0x0031, 0x0039, 0x0008, 0x0000, 0}, /* 198 */
+-    {0x0031, 0x0030, 0x0007, 0x0000, 0}, /* 107 */
+-    {0x0031, 0x0033, 0x0001, 0x0000, 0}, /* 131 */
+-    {0x0031, 0x0033, 0x0002, 0x0000, 0}, /* 132 */
+-    {0x0031, 0x0033, 0x0003, 0x0000, 0}, /* 133 */
+-    {0x0031, 0x0032, 0x0007, 0x0000, 0}, /* 127 */
+-    {0x0031, 0x0035, 0x0006, 0x0000, 0}, /* 156 */
+-    {0x0031, 0x0036, 0x0005, 0x0000, 0}, /* 165 */
+-    {0x0031, 0x0030, 0x0003, 0x0000, 0}, /* 103 */
+-    {0x0039, 0x0031, 0x0002, 0x0000, 0}, /* 912 */
+-    {0x0039, 0x0031, 0x0003, 0x0000, 0}, /* 913 */
+-    {0x0031, 0x0030, 0x0005, 0x0000, 0}, /* 105 */
+-    {0x0031, 0x0030, 0x0006, 0x0000, 0}, /* 106 */
+-    {0x0031, 0x0037, 0x0001, 0x0000, 0}, /* 171 */
++    {0x0031, 0x0039, 0x0039, 0x0000, 0}, /* 199 */
++    {0x0031, 0x0039, 0x0035, 0x0000, 0}, /* 195 */
+ 
+     {0x0000, 0x0000, 0x0000, 0x0000, 0}
+ };
+ 
++const kal_uint16 ecc_num_PY[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_BR[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0039, 0x0030, 0x0000, 1}, /* 190 */
++    {0x0031, 0x0039, 0x0032, 0x0000, 1}, /* 192 */
++    {0x0031, 0x0039, 0x0033, 0x0000, 1}, /* 193 */
++
++    {0x0031, 0x0039, 0x0030, 0x0001, 0}, /* 191 */
++    {0x0031, 0x0039, 0x0034, 0x0000, 0}, /* 194 */
++    {0x0031, 0x0039, 0x0037, 0x0000, 0}, /* 197 */
++    {0x0031, 0x0039, 0x0038, 0x0000, 0}, /* 198 */
++    {0x0031, 0x0039, 0x0039, 0x0000, 0}, /* 199 */
++    {0x0031, 0x0030, 0x0030, 0x0000, 0}, /* 100 */
++    {0x0031, 0x0032, 0x0038, 0x0000, 0}, /* 128 */
++
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_PK[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0035, 0x0000, 0x0000, 0}, /* 15 */
++    {0x0031, 0x0031, 0x0035, 0x0000, 0}, /* 115 */
++    {0x0031, 0x0036, 0x0000, 0x0000, 0}, /* 16 */
++    
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_MX[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0030, 0x0036, 0x0036, 0x0000, 0}, /* 066 */
++    {0x0030, 0x0036, 0x0035, 0x0000, 0}, /* 065 */
++    {0x0030, 0x0036, 0x0038, 0x0000, 0}, /* 068 */
++    
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++const kal_uint16 ecc_num_CN[ ][ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1] = 
++{
++    {0x0031, 0x0031, 0x0032, 0x0000, 1}, /* 112 */
++    {0x0039, 0x0031, 0x0031, 0x0000, 1}, /* 911 */
++
++    {0x0031, 0x0031, 0x0030, 0x0000, 0}, /* 110 */
++    {0x0031, 0x0031, 0x0039, 0x0000, 0}, /* 119 */
++    {0x0031, 0x0032, 0x0032, 0x0000, 0}, /* 122 */
++    {0x0031, 0x0031, 0x0034, 0x0000, 0}, /* 114 */
++    {0x0031, 0x0032, 0x0031, 0x0000, 0}, /* 121 */
++    {0x0039, 0x0039, 0x0039, 0x0000, 0}, /* 999 */
++    
++    {0x0000, 0x0000, 0x0000, 0x0000, 0}
++};
++
++/* TODO STEP 2/3: Add other country's emergency number */
++
++typedef const kal_uint16 (*ECC_NUM_PTR_TYPE)[ECC_CUSTOM_DEFAULT_ECC_LENGTH + 1];
++// @}
++
++
+ static ecc_record_struct ecc_sim1_number[ECC_CUSTOM_MAX_SIM_RECORD];
+ #ifdef __REL5__
+ static ecc_record_struct ecc_nw1_number[ECC_CUSTOM_MAX_NW_RECORD];
+@@ -849,6 +988,66 @@ static kal_bool ecc_custom_verify_emergency_number_with_suffix(kal_uint8 *in_num
+     return KAL_FALSE;
+ }
+ 
++/*****************************************************************************
++ * FUNCTION
++ *  get_ecc_nums
++ * DESCRIPTION
++ *  get emergency numbers by plmn(mmc + mnc)
++ * PARAMETERS
++ *  
++ * RETURNS
++ *  kal_bool
++ *
++ * Added by Joseth
++ *****************************************************************************/
++static ECC_NUM_PTR_TYPE get_ecc_nums(const kal_uint8 *plmn) {
++	kal_prompt_trace(MOD_ATCI, "get_ecc_nums plmn = %s", plmn);
++
++	if (plmn == NULL)
++		return ecc_default_num;
++	
++	if ((kal_mem_cmp(plmn, MCC_IN_01, 3) == 0)
++			|| (kal_mem_cmp(plmn, MCC_IN_02, 3) == 0)
++			|| (kal_mem_cmp(plmn, MCC_IN_03, 3) == 0)) {
++		return ecc_num_IN;
++	} else if (kal_mem_cmp(plmn, MCC_RU, 3) == 0) {
++		return ecc_num_RU;
++	} else if (kal_mem_cmp(plmn, MCC_PH, 3) == 0) {
++		return ecc_num_PH;
++	} else if (kal_mem_cmp(plmn, MCC_BD, 3) == 0) {
++		return ecc_num_BD;
++	} else if (kal_mem_cmp(plmn, MCC_ID, 3) == 0) {
++		return ecc_num_ID;
++	} else if (kal_mem_cmp(plmn, MCC_VN, 3) == 0) {
++		return ecc_num_VN;
++	} else if (kal_mem_cmp(plmn, MCC_TH, 3) == 0) {
++		return ecc_num_TH;
++	} else if (kal_mem_cmp(plmn, MCC_PY, 3) == 0) {
++		return ecc_num_PY;
++	} else if (kal_mem_cmp(plmn, MCC_BR, 3) == 0) {
++		return ecc_num_BR;
++	} else if (kal_mem_cmp(plmn, MCC_PK, 3) == 0) {
++		return ecc_num_PK;
++	} else if (kal_mem_cmp(plmn, MCC_MX, 3) == 0) {
++		return ecc_num_MX;
++	} else if ((kal_mem_cmp(plmn, MCC_CN_01, 3) == 0)
++			|| (kal_mem_cmp(plmn, MCC_CN_02, 3) == 0)) {
++		return ecc_num_CN;
++	/* TODO STEP 3/3: return emergency numbers by mcc */
++	} else {
++		return ecc_default_num;
++	}
++}
++
++void dumpEccNums(ECC_NUM_PTR_TYPE nums) {
++	int i;
++
++	kal_prompt_trace(MOD_ATCI, "dumpEccNumbs begin ...");
++	for (i = 0; nums[i][0] != 0x00; i++) {
++		kal_prompt_trace(MOD_ATCI, "nums[%d] = %s", i, (char*)(nums[i]));
++	}
++	kal_prompt_trace(MOD_ATCI, "dumpEccNumbs end");
++}
+ 
+ /*****************************************************************************
+  * FUNCTION
+@@ -913,11 +1112,19 @@ kal_bool ecc_custom_verify_emergency_number(
+ #ifdef __REL5__
+     ecc_record_struct *nw_context;
+ #endif
++	ECC_NUM_PTR_TYPE ecc_nums;
++	const kal_uint8 *plmn;
+ 
+     /*----------------------------------------------------------------*/
+     /* Code Body                                                      */
+     /*----------------------------------------------------------------*/
+-    
++	// Added by Joseth @{
++	extern const kal_uint8 *getLimitPlmn();
++	plmn = getLimitPlmn();
++	ecc_nums = get_ecc_nums(plmn);
++	//dumpEccNums(ecc_nums);
++	// @}
++
+     /* default response data */
+     if (ecc_category != NULL)
+     {
+@@ -1113,7 +1320,7 @@ kal_bool ecc_custom_verify_emergency_number(
+ #endif /* defined(PLUTO_MMI) */
+ 
+     /* verify default record finally */
+-    for (i = 0; ecc_default_num[i][0] != 0x00; i++)
++    for (i = 0; ecc_nums[i][0] != 0x00; i++)
+     {
+     #ifdef __GEMINI__
+         #ifdef __GEMINI_3G_SWITCH__
+@@ -1121,7 +1328,7 @@ kal_bool ecc_custom_verify_emergency_number(
+         #else
+             sim_id = SIM1;
+         #endif
+-        if (call_type == ECC_SIM1_CALL && ecc_custom_is_sim_inserted(SIM1) && !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++        if (call_type == ECC_SIM1_CALL && ecc_custom_is_sim_inserted(SIM1) && !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+@@ -1130,17 +1337,17 @@ kal_bool ecc_custom_verify_emergency_number(
+         #else
+             sim_id = SIM2;
+         #endif
+-        if (call_type == ECC_SIM2_CALL && ecc_custom_is_sim_inserted(SIM2) && !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++        if (call_type == ECC_SIM2_CALL && ecc_custom_is_sim_inserted(SIM2) && !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+     #if (GEMINI_PLUS >= 3) // Gemini+
+-        if (call_type == ECC_SIM3_CALL && ecc_custom_is_sim_inserted(SIM3) && !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++        if (call_type == ECC_SIM3_CALL && ecc_custom_is_sim_inserted(SIM3) && !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+     #if (GEMINI_PLUS >= 4) // Gemini+
+-        if (call_type == ECC_SIM4_CALL && ecc_custom_is_sim_inserted(SIM4) && !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++        if (call_type == ECC_SIM4_CALL && ecc_custom_is_sim_inserted(SIM4) && !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+@@ -1155,12 +1362,12 @@ kal_bool ecc_custom_verify_emergency_number(
+             ecc_custom_is_sim_inserted(SIM4) &&
+     #endif
+     #endif
+-            !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++            !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+     #else /* __GEMINI__ */
+-        if (ecc_custom_is_sim_inserted(SIM1) && !(kal_bool) ecc_default_num[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
++        if (ecc_custom_is_sim_inserted(SIM1) && !(kal_bool) ecc_nums[i][ECC_CUSTOM_DEFAULT_ECC_LENGTH])
+         {
+             sim_with_ecc_num_case = 1;
+         }
+@@ -1172,21 +1379,21 @@ kal_bool ecc_custom_verify_emergency_number(
+         	continue;
+         }
+ 
+-        if (kal_dchar_strcmp((char*) ecc_verify, (char*) ecc_default_num[i]) == 0)
++        if (kal_dchar_strcmp((char*) ecc_verify, (char*) ecc_nums[i]) == 0)
+         {
+             if (verify_detail != NULL) *verify_detail = ECC_FULLY_MATCH;
+ 
+             return KAL_TRUE;
+         }
+ 
+-        if (ecc_custom_verify_emergency_number_with_suffix(ecc_verify, (kal_uint8*) ecc_default_num[i]))
++        if (ecc_custom_verify_emergency_number_with_suffix(ecc_verify, (kal_uint8*) ecc_nums[i]))
+         {
+             if (verify_detail != NULL) *verify_detail = ECC_FULLY_MATCH;
+ 
+             return KAL_TRUE;
+         }
+ 
+-        if (verify_detail != NULL && kal_dchar_strncmp((char*) ecc_default_num[i], (char*) ecc_verify, kal_dchar_strlen((char*) ecc_verify)) == 0)
++        if (verify_detail != NULL && kal_dchar_strncmp((char*) ecc_nums[i], (char*) ecc_verify, kal_dchar_strlen((char*) ecc_verify)) == 0)
+         {
+             *verify_detail = ECC_PARTIALLY_MATCH;
+         }
+diff --git a/modem/custom/modem/common/ps/customer_at_command.c b/modem/custom/modem/common/ps/customer_at_command.c
+index 3cd545c..cdf62dc 100644
+--- a/modem/custom/modem/common/ps/customer_at_command.c
++++ b/modem/custom/modem/common/ps/customer_at_command.c
+@@ -364,6 +364,26 @@ custom_cmd_mode_enum custom_find_cmd_mode(custom_cmdLine *cmd_line)
+     return (result);
+ }
+ 
++// Added by Joseth @{
++kal_uint8 g_plmn[16] = {'\0'};
++#define DEFAULT_PLMN	"00000"
++
++const kal_uint8 *getLimitPlmn() {
++	kal_prompt_trace(MOD_ATCI, "getLimitPlmn g_plmn = %s", g_plmn);
++	
++	if (strlen(g_plmn) < 5)
++		return DEFAULT_PLMN;
++
++	return g_plmn;
++}
++
++void setLimitPlmn(kal_uint8 *plmn) {
++	if (plmn == NULL)
++		return;
++
++	strlcpy(g_plmn, plmn, sizeof(g_plmn));
++}
++// @}
+ 
+ /*****************************************************************************
+ * FUNCTION
+@@ -495,6 +515,18 @@ kal_bool custom_command_hdlr(char *full_cmd_string)
+         }
+     }
+     #endif
++	#if 1 /* Added by Joseth @{*/
++	else if (strcmp(cmd_name, "GPLMN") == 0)
++	{
++		kal_prompt_trace(MOD_ATCI,"Recv GPLMN Command: g_plmn = %s", g_plmn);
++		sprintf(buffer, "GPLMN:%s", g_plmn);
++		rmmi_write_to_uart((kal_uint8 *)buffer, strlen(buffer), KAL_TRUE);
++
++        sprintf(buffer, "OK");
++        rmmi_write_to_uart((kal_uint8*)buffer, strlen(buffer), KAL_TRUE);
++        return KAL_TRUE;
++	}
++	#endif /* @}*/
+     #if (defined(__COMPOSITE_WEBCAM__)) 
+     else if (strcmp(cmd_name, "SENSOR") == 0)
+     {
+diff --git a/modem/custom/modem/common/ps/lmmi_ind.c b/modem/custom/modem/common/ps/lmmi_ind.c
+index 7f37fef..39c260b 100644
+--- a/modem/custom/modem/common/ps/lmmi_ind.c
++++ b/modem/custom/modem/common/ps/lmmi_ind.c
+@@ -968,7 +968,17 @@ void l4c_nw_attach_lind (kal_uint8 status,
+                                 kal_uint8 cause,
+                                 kal_uint8 data_speed_support,
+                                 kal_bool is_on_hplmn,
+-                                domain_id_enum domain){} 
++                                domain_id_enum domain){
++	// Added by Joseth @{
++	extern void setLimitPlmn(kal_uint8 *plmn);
++
++	kal_prompt_trace(MOD_ATCI,
++		"l4c_nw_attach_lind status = %d, plmn = %s, gsm_state = %d", 
++		status, plmn, gsm_state);
++	//if (status == L4C_RAC_LIMITED_SERVICE)
++		setLimitPlmn(plmn);
++	// @}
++}
+ 
+ void l4c_nw_rx_level_lind(kal_uint8 rat,
+ 	                      kal_int32 rssi_in_qdbm,
+diff --git a/packages/apps/Phone/src/com/android/phone/CallController.java b/packages/apps/Phone/src/com/android/phone/CallController.java
+index c8ffd0f..4a940ae 100755
+--- a/packages/apps/Phone/src/com/android/phone/CallController.java
++++ b/packages/apps/Phone/src/com/android/phone/CallController.java
+@@ -605,10 +605,10 @@ public class CallController extends Handler {
+         }
+ 
+         // Added by Joseth @{
+-        if (PhoneNumberUtilsEx.isSpecialEmergencyNumber2(number)
+-	            && okToCallStatus == CallStatusCode.OUT_OF_SERVICE) {
+-            number = "112";
+-        }
++        //if (PhoneNumberUtilsEx.isSpecialEmergencyNumber2(number)
++	    //        && okToCallStatus == CallStatusCode.OUT_OF_SERVICE) {
++        //    number = "112";
++        //}
+         // @}
+ 
+         // If we're trying to call an emergency number, then it's OK to
+-- 
+1.7.0.4
+

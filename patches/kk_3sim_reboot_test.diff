@@ -1,0 +1,133 @@
+diff --git a/frameworks/base/packages/SystemUI/AndroidManifest.xml b/frameworks/base/packages/SystemUI/AndroidManifest.xml
+index ede4d33..c08a26c 100644
+--- a/frameworks/base/packages/SystemUI/AndroidManifest.xml
++++ b/frameworks/base/packages/SystemUI/AndroidManifest.xml
+@@ -88,6 +88,7 @@
+ 
+     <!-- Wifi Display -->
+     <uses-permission android:name="android.permission.CONFIGURE_WIFI_DISPLAY" />
++	<uses-permission android:name="android.permission.REBOOT" />
+ 
+     <!-- M: [LCA] Use System Config.  
+             For LCA project, use SW render
+diff --git a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/SignalClusterView.java b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/SignalClusterView.java
+index 7116cd1..fd80804 100644
+--- a/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/SignalClusterView.java
++++ b/frameworks/base/packages/SystemUI/src/com/android/systemui/statusbar/SignalClusterView.java
+@@ -47,11 +47,19 @@ import com.mediatek.telephony.SimInfoManager;
+ import com.mediatek.telephony.TelephonyManagerEx;
+ import com.mediatek.xlog.Xlog;
+ 
++
++import android.content.SharedPreferences;
++import android.os.PowerManager;
++import android.util.Log;
++
++
++
+ /// M: [SystemUI] Support dual SIM.
+ public class SignalClusterView extends LinearLayout implements NetworkController.SignalCluster {
+     private static final String TAG = "SignalClusterView";
+ 
+     static final boolean DEBUG = false;
++    Context mContext;
+ 
+     private NetworkController mNC;
+ 
+@@ -119,6 +127,8 @@ public class SignalClusterView extends LinearLayout implements NetworkController
+     public SignalClusterView(Context context, AttributeSet attrs, int defStyle) {
+         super(context, attrs, defStyle);
+ 
++        mContext = context;
++        
+         mGeminiSimNum = SIMHelper.getNumOfSim();
+         mRoaming = new boolean[mGeminiSimNum];
+         mRoamingId = new int[mGeminiSimNum];
+@@ -458,6 +468,12 @@ public class SignalClusterView extends LinearLayout implements NetworkController
+                         && PhoneConstants.SIM_INDICATOR_SEARCHING != state
+                         && PhoneConstants.SIM_INDICATOR_INVALID != state
+                         && PhoneConstants.SIM_INDICATOR_RADIOOFF != state) {
++                    // Added by Joseth @{
++                        if (state >= PhoneConstants.SIM_INDICATOR_NORMAL) {
++                            rebootWhenAllSimsReady(mContext, i);
++                        }
++                    // @}
++                                  
+                     int simColorId = SIMHelper.getSIMColorIdBySlot(mContext, i);
+                     if (simColorId > -1 && simColorId < 4 && mNetworkType[i] != null) {
+                         IconIdWrapper resId = new IconIdWrapper(0);
+@@ -629,4 +645,74 @@ public class SignalClusterView extends LinearLayout implements NetworkController
+         }
+         return showOffline;
+     }
++
++
++
++    // Added by Joseth @{
++    private static final String TAG_JOSETH = "JOSETH";
++    private static int sSimChecked = 0;
++    public static final String PREFS_SIM_TEST = "sim_tests";
++    public static final String PREFS_KEY_REBOOT_COUNT = "reboot_count";
++    private static boolean sRebooting = false;
++    
++    private void rebootWhenAllSimsReady(Context context, int simId) {
++        Log.d(TAG_JOSETH, "rebootWhenSimRegisterred: simId = " + simId);
++
++        if (sRebooting) return;
++        
++        // all sims have been checked?
++        sSimChecked |= 1 << simId;
++        
++        int allSimCheced = 0;
++        for (int i = PhoneConstants.GEMINI_SIM_1;
++                i < mGeminiSimNum; i++) {
++            //if (SIMHelper.isSimInserted(i))
++                allSimCheced |= 1 << i;
++        }
++
++        Log.d(TAG_JOSETH, "sSimChecked = " + sSimChecked 
++                + ", mGeminiSimNum = " + mGeminiSimNum
++                + ", allSimCheced = " + allSimCheced
++                + ", rebootCount = " + getRebootCount(context));
++        if (allSimCheced == sSimChecked) {
++            postDelayed(mRebootRunnable, 15 * 1000);
++            sRebooting = true;
++        }
++   }    
++    
++    Runnable mRebootRunnable = new Runnable () {
++
++        @Override
++        public void run() {
++            try {
++                increaseRebootCount(mContext);
++                
++                Log.d(TAG_JOSETH, "rebooting ... ");
++                PowerManager pm = (PowerManager) mContext.getSystemService(Context.POWER_SERVICE);
++                pm.reboot("test");
++
++            } catch (Exception ex) {
++                ex.printStackTrace();
++                Log.e(TAG_JOSETH, "reboot error");
++            }
++        }
++        
++    };
++
++    public int getRebootCount(Context context) {
++        SharedPreferences settings = context.getSharedPreferences(PREFS_SIM_TEST, 0);
++        return settings.getInt(PREFS_KEY_REBOOT_COUNT, 0);
++    }
++
++    private void increaseRebootCount(Context context) {
++        SharedPreferences settings = context.getSharedPreferences(PREFS_SIM_TEST, 0);
++        int cnt = settings.getInt(PREFS_KEY_REBOOT_COUNT, 0);
++        SharedPreferences.Editor editor = settings.edit();
++
++        editor.putInt(PREFS_KEY_REBOOT_COUNT, cnt + 1);
++        editor.commit();
++    }
++    
++    // @}
++    
+ }
