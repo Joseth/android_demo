@@ -1,3 +1,7 @@
 <resources>
     <string name="app_name">AndroidDemo</string>
+    <string name="notifyTitle">Notify</string>
+    <string name="notifyMsg">Permission</string>
+    <string name="cancel">Cancel</string>
+    <string name="setting">Settings</string>
 </resources>

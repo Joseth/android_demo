@@ -25,3 +25,10 @@ allprojects {
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
+
+ext {
+    CONFIG_MIN_SDK_VERSION = 22
+    CONFIG_COMPILER_VERSION = 25
+    CONFIG_SUPPORT_LIB_VERSION = '25.4.0'  // variable that can be referenced to keep support libs consistent
+    CONFIG_TARGET_VERSION = 22
+}
