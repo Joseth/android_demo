@@ -24,7 +24,7 @@ public class MainActivity extends CheckPermissionsActivity implements Handler.Ca
     private TextureView mTextureView2;
     private boolean mTextureView2Ready;
     private Surface mDisplaySurface;
-    private long mRenderHandler = -1;
+    private long mRenderHandler = 0;
 
     static final int UVC_FRAME_FORMAT_NV21 = 1;
 
@@ -126,7 +126,7 @@ public class MainActivity extends CheckPermissionsActivity implements Handler.Ca
         if (mCamera != null)
             handleCloseCamera();
 
-        mCamera = Camera.open(1);
+        mCamera = Camera.open(0);
 
         Camera.Parameters parameters = mCamera.getParameters();
 
@@ -159,9 +159,10 @@ public class MainActivity extends CheckPermissionsActivity implements Handler.Ca
         if (mCamera == null)
             return;
 
-        if (mRenderHandler > 0) {
+        Log.d(TAG, "handleCloseCamera: mRenderHandler = " + mRenderHandler);
+        if (mRenderHandler != 0) {
             nativeRenderRelease(mRenderHandler);
-            mRenderHandler = -1;
+            mRenderHandler = 0;
         }
 
         mCamera.setPreviewCallbackWithBuffer(null);
@@ -190,13 +191,14 @@ public class MainActivity extends CheckPermissionsActivity implements Handler.Ca
         mWorkHandler.post(new Runnable() {
             @Override
             public void run() {
-                if (mRenderHandler > 0) {
+                if (mRenderHandler != 0) {
                     int ret = nativeRender(mRenderHandler, data, data.length, UVC_FRAME_FORMAT_NV21);
 
                     Log.d(TAG, "nativeRender: ret = " + ret);
                 }
 
-                mCamera.addCallbackBuffer(data);
+                if (mCamera != null)
+                    mCamera.addCallbackBuffer(data);
 
                 synchronized (mBufferSync) {
                     mReady = true;

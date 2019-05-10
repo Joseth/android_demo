@@ -25,17 +25,19 @@ SurfaceRender::SurfaceRender(ANativeWindow *window, const int32_t width, const i
 }
 
 SurfaceRender::~SurfaceRender() {
+    LOGD("~SurfaceRender");
     if (mPreviewWindow != NULL) {
         ANativeWindow_release(mPreviewWindow);
         mPreviewWindow = NULL;
+        LOGD("release window");
     }
 
     if (mRgbxFrame != NULL) {
         free_frame(mRgbxFrame);
         mRgbxFrame = NULL;
+        LOGD("free mRgbxFrame");
     }
 }
-
 
 static void copyFrame(const uint8_t *src, uint8_t *dest, const int width, int height, const int stride_src, const int stride_dest) {
     const int h8 = height % 8;
@@ -64,7 +66,8 @@ static void copyFrame(const uint8_t *src, uint8_t *dest, const int width, int he
 }
 
 int copyToSurface(const frame_t *frame, ANativeWindow **window) {
-    // ENTER();
+    LOGD("copyToSurface start: width = %d, height = %d, rgbxSize = %d", frame->width, frame->height, frame->data_bytes);
+
     int result = 0;
     if (LIKELY(*window)) {
         ANativeWindow_Buffer buffer;
@@ -129,7 +132,7 @@ int SurfaceRender::render(const int8_t *yuv, const int32_t yuvSize, const int32_
     }
 
     ret = uvc_any2rgbx(&origFrame, mRgbxFrame);
-    LOGV("render: uvc_any2rgbx: ret = %d, mRgbxFrame = %d", ret, mRgbxFrame->data);
+    LOGV("render: uvc_any2rgbx: ret = %d, mRgbxFrame = 0x%X", ret, mRgbxFrame->data);
     if (ret < 0) {
         return ret;
     }

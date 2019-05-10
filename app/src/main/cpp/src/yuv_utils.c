@@ -112,17 +112,25 @@ int32_t uvc_any2rgbx(frame_t *in, frame_t *out) {
     }
 }
 
-#define YG 18997 /* round(1.164 * 64 * 256 * 256 / 257) */
+// BT.601 YUV to RGB reference
+//  R = (Y - 16) * 1.164              - V * -1.596
+//  G = (Y - 16) * 1.164 - U *  0.391 - V *  0.813
+//  B = (Y - 16) * 1.164 - U * -2.018
+
+// Y contribution to R,G,B.  Scale and bias.
+#define YG 18997  /* round(1.164 * 64 * 256 * 256 / 257) */
 #define YGB -1160 /* 1.164 * 64 * -16 + 64 / 2 */
 
+// U and V contributions to R,G,B.
 #define UB -128 /* max(-128, round(-2.018 * 64)) */
-#define UG 25 /* round(0.391 * 64) */
-#define VG 52 /* round(0.813 * 64) */
+#define UG 25   /* round(0.391 * 64) */
+#define VG 52   /* round(0.813 * 64) */
 #define VR -102 /* round(-1.596 * 64) */
 
-#define BB (UB * 128            + YGB)
+// Bias values to subtract 16 from Y and 128 from U and V.
+#define BB (UB * 128 + YGB)
 #define BG (UG * 128 + VG * 128 + YGB)
-#define BR            (VR * 128 + YGB)
+#define BR (VR * 128 + YGB)
 
 int32_t clamp0(int32_t v) { return ((-(v) >> 31) & (v)); }
 
@@ -133,11 +141,11 @@ uint32_t Clamp(int32_t val) {
     return (uint32_t) (clamp255(v));
 }
 
-void YuvPixel(uint8_t y, uint8_t u, uint8_t v, uint8_t *r, uint8_t *g, uint8_t *b) {
+void YuvPixel(uint8_t y, uint8_t u, uint8_t v, uint8_t *b, uint8_t *g, uint8_t *r) {
     uint32_t y1 = (uint32_t) (y * 0x0101 * YG) >> 16;
-    *r = Clamp((int32_t) (-(u * UB) + y1 + BB) >> 6);
+    *b = Clamp((int32_t) (-(u * UB) + y1 + BB) >> 6);
     *g = Clamp((int32_t) (-(v * VG + u * UG) + y1 + BG) >> 6);
-    *b = Clamp((int32_t) (-(v * VR) + y1 + BR) >> 6);
+    *r = Clamp((int32_t) (-(v * VR) + y1 + BR) >> 6);
 }
 
 void NV21ToRGBXRow_C(const uint8_t *src_y, const uint8_t *src_vu, uint8_t *rgb_buf, int width) {
@@ -146,10 +154,10 @@ void NV21ToRGBXRow_C(const uint8_t *src_y, const uint8_t *src_vu, uint8_t *rgb_b
     for (x = 0; x < width - 1; x += 2) {
 //        LOGV("NV21ToRGBXRow_C: x = %d, src_y = %d, src_vu = %d, rgb_buf = %d", x, src_y, src_vu, rgb_buf);
 
-        YuvPixel(src_y[0], src_vu[1], src_vu[0], rgb_buf + 0, rgb_buf + 1, rgb_buf + 2);
+        YuvPixel(src_y[0], src_vu[1], src_vu[0], rgb_buf + 2, rgb_buf + 1, rgb_buf + 0);
         rgb_buf[3] = 255;
 
-        YuvPixel(src_y[1], src_vu[1], src_vu[0], rgb_buf + 4, rgb_buf + 5, rgb_buf + 6);
+        YuvPixel(src_y[1], src_vu[1], src_vu[0], rgb_buf + 6, rgb_buf + 5, rgb_buf + 4);
         rgb_buf[7] = 255;
 
         src_y += 2;
@@ -159,7 +167,7 @@ void NV21ToRGBXRow_C(const uint8_t *src_y, const uint8_t *src_vu, uint8_t *rgb_b
 
 //    LOGV("NV21ToRGBXRow_C: width = %d", width);
     if (width & 1) {
-        YuvPixel(src_y[0], src_vu[1], src_vu[0], rgb_buf + 0, rgb_buf + 1, rgb_buf + 2);
+        YuvPixel(src_y[0], src_vu[1], src_vu[0], rgb_buf + 2, rgb_buf + 1, rgb_buf + 0);
         rgb_buf[3] = 255;
     }
 }
@@ -193,6 +201,10 @@ int32_t uvc_nv212rgbx(frame_t *in, frame_t *out) {
     int aligned_src_width = (src_width + 1) & ~1;
     const uint8_t* src_uv = src + aligned_src_width * src_height;
     int argb_stride = src_width * PIXEL_RGBX; //  should be width * 4 or width must be 1 right
+
+    out->width = in->width;
+    out->height = in->height;
+    out->frame_format = UVC_FRAME_FORMAT_RGBX;
 
     return NV21ToRGBX(src, src_width, src_uv, aligned_src_width,
             crop_argb, argb_stride, src_width, src_height);
