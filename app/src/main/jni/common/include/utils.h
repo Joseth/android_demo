@@ -1,9 +1,11 @@
 //
-// Created by lishengjun on 19-5-9.
+// Created by joseth on 20-2-20.
 //
-
-#ifndef MYAPPLICATION_UTILS_H
-#define MYAPPLICATION_UTILS_H
+#ifndef HYTERNADEMO_UTILS_H
+#define HYTERNADEMO_UTILS_H
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #if defined(__GNUC__)
 // the macro for branch prediction optimaization for gcc(-O2/-O3 required)
@@ -19,4 +21,12 @@
 #define		SAFE_FREE(p)				{ if (p) { free((p)); (p) = NULL; } }
 #define		SAFE_DELETE(p)				{ if (p) { delete (p); (p) = NULL; } }
 
-#endif //MYAPPLICATION_UTILS_H
+#define  MIN(a, b)  (((a) > (b)) ? (b) : (a))
+#define  MAX(a, b)  (((a) > (b)) ? (a) : (b))
+
+int get_bits_per_pixel(int format);
+
+#ifdef __cplusplus
+}
+#endif
+#endif //HYTERNADEMO_UTILS_H

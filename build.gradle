@@ -2,12 +2,12 @@
 
 buildscript {
     repositories {
-        google()
-        jcenter()
+//        google()
+//        jcenter()
         
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:3.3.1'
+        classpath 'com.android.tools.build:gradle:3.5.2'
         
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -16,8 +16,8 @@ buildscript {
 
 allprojects {
     repositories {
-        google()
-        jcenter()
+//        google()
+//        jcenter()
         
     }
 }
@@ -27,8 +27,13 @@ task clean(type: Delete) {
 }
 
 ext {
-    CONFIG_MIN_SDK_VERSION = 22
-    CONFIG_COMPILER_VERSION = 25
-    CONFIG_SUPPORT_LIB_VERSION = '25.4.0'  // variable that can be referenced to keep support libs consistent
-    CONFIG_TARGET_VERSION = 22
+    CONFIG_MIN_SDK_VERSION = 23
+    CONFIG_COMPILER_VERSION = 28
+    CONFIG_BUILD_TOOLS_VERSION = '28.0.3'
+    CONFIG_SUPPORT_LIB_VERSION = '28.0.0'
+    // variable that can be referenced to keep support libs consistent
+    CONFIG_TARGET_VERSION = 24
+
+    versionNameString = '1.0.0'
+    commonLibVersion= '1.5.20'
 }

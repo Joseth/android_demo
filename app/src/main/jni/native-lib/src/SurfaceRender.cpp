@@ -3,7 +3,7 @@
 //
 #define __ANDROID_DEBUG__
 #define LOG_TAG     "SurfaceRender"
-#include <log.h>
+#include <mc_log.h>
 
 #include <assert.h>
 #include <string.h>
@@ -25,17 +25,17 @@ SurfaceRender::SurfaceRender(ANativeWindow *window, const int32_t width, const i
 }
 
 SurfaceRender::~SurfaceRender() {
-    LOGD("~SurfaceRender");
+    ALOGD("~SurfaceRender");
     if (mPreviewWindow != NULL) {
         ANativeWindow_release(mPreviewWindow);
         mPreviewWindow = NULL;
-        LOGD("release window");
+        ALOGD("release window");
     }
 
     if (mRgbxFrame != NULL) {
         free_frame(mRgbxFrame);
         mRgbxFrame = NULL;
-        LOGD("free mRgbxFrame");
+        ALOGD("free mRgbxFrame");
     }
 }
 
@@ -66,7 +66,7 @@ static void copyFrame(const uint8_t *src, uint8_t *dest, const int width, int he
 }
 
 int copyToSurface(const frame_t *frame, ANativeWindow **window) {
-    LOGD("copyToSurface start: width = %d, height = %d, rgbxSize = %d", frame->width, frame->height, frame->data_bytes);
+    ALOGD("copyToSurface start: width = %d, height = %d, rgbxSize = %d", frame->width, frame->height, frame->data_bytes);
 
     int result = 0;
     if (LIKELY(*window)) {
@@ -94,7 +94,7 @@ int copyToSurface(const frame_t *frame, ANativeWindow **window) {
         result = -1;
     }
 
-    LOGV("copyToSurface: result = %d", result);
+    ALOGV("copyToSurface: result = %d", result);
 
     return result; //RETURN(result, int);
 }
@@ -102,7 +102,7 @@ int copyToSurface(const frame_t *frame, ANativeWindow **window) {
 int SurfaceRender::render(const int8_t *yuv, const int32_t yuvSize, const int32_t format) {
     int32_t ret;
 
-    LOGV("render: size = %d, format = %d, width = %d, height = %d", yuvSize, format, mWidth, mHeight);
+    ALOGV("render: size = %d, format = %d, width = %d, height = %d", yuvSize, format, mWidth, mHeight);
 
     if (mPreviewWindow == NULL)
         return -1;
@@ -132,7 +132,7 @@ int SurfaceRender::render(const int8_t *yuv, const int32_t yuvSize, const int32_
     }
 
     ret = uvc_any2rgbx(&origFrame, mRgbxFrame);
-    LOGV("render: uvc_any2rgbx: ret = %d, mRgbxFrame = 0x%X", ret, mRgbxFrame->data);
+    ALOGV("render: uvc_any2rgbx: ret = %d, mRgbxFrame = 0x%X", ret, mRgbxFrame->data);
     if (ret < 0) {
         return ret;
     }

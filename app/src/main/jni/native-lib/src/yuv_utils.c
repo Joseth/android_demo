@@ -1,14 +1,14 @@
 //
 // Created by lishengjun on 19-5-9.
 //
-#define __ANDROID_DEBUG__
 #define LOG_TAG     "yuvUtils"
-#include <log.h>
+
+#include <mc_log.h>
 
 #include <malloc.h>
 #include "yuv_utils.h"
 #include "error.h"
-#include "utils.h"
+#include <utils.h>
 
 #define USE_STRIDE 1
 
@@ -96,7 +96,7 @@ int32_t uvc_ensure_frame_size(frame_t *frame, size_t need_bytes) {
 }
 
 int32_t uvc_any2rgbx(frame_t *in, frame_t *out) {
-    LOGV("uvc_any2rgbx: format = %d, out = %d", in->frame_format, out->data);
+    ALOGV("uvc_any2rgbx: format = %d, out = %d", in->frame_format, out->data);
 
     switch (in->frame_format) {
         case UVC_FRAME_FORMAT_NV21:
@@ -424,7 +424,7 @@ int32_t uvc_rgb2rgbx(frame_t *in, frame_t *out) {
 }
 
 frame_t *allocate_frame(size_t data_bytes) {
-    LOGV("allocate_frame: data_bytes = %d", data_bytes);
+    ALOGV("allocate_frame: data_bytes = %d", data_bytes);
 
     frame_t *frame = malloc(sizeof(frame_t));
 
@@ -447,7 +447,7 @@ frame_t *allocate_frame(size_t data_bytes) {
             return NULL;
         }
 
-        LOGV("data_bytes = %d, dataPtr = %d", data_bytes, frame->data);
+        ALOGV("data_bytes = %d, dataPtr = %d", data_bytes, frame->data);
     }
 
     return frame;

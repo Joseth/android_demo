@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <string>
 #include <android/native_window_jni.h>
+#include <utils.h>
 
 #include "SurfaceRender.h"
 #include "utils.h"
