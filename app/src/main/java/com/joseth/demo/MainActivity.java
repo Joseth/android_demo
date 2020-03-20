@@ -1,263 +1,132 @@
 package com.joseth.demo;
 
-import android.graphics.ImageFormat;
-import android.graphics.SurfaceTexture;
-import android.hardware.Camera;
+import android.app.ListActivity;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Message;
-import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
-import android.view.Surface;
-import android.view.TextureView;
-import android.widget.TextView;
+import android.view.View;
+import android.widget.ListView;
+import android.widget.SimpleAdapter;
 
-import java.io.FileDescriptor;
-import java.io.IOException;
+import java.text.Collator;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
-public class MainActivity extends CheckPermissionsActivity implements Handler.Callback, Camera.PreviewCallback {
-    private static final String TAG = "MainActivity";
-
-    private TextureView mTextureView1;
-    private boolean mTextureView1Ready;
-    private TextureView mTextureView2;
-    private boolean mTextureView2Ready;
-    private Surface mDisplaySurface;
-    private long mRenderHandler = 0;
-
-    static final int UVC_FRAME_FORMAT_NV21 = 1;
-
-    private static final int PREVIEW_WIDTH = 640;
-    private static final int PREVIEW_HEIGHT = 480;
-    private int mPreviewWidth = PREVIEW_WIDTH;
-    private int mPreviewHeight = PREVIEW_HEIGHT;
-
-    private static final int MSG_ID_TEXTUREVIEW_READY = 1;
-    private static final int MSG_ID_TEXTUREVIEW_DESTROY = 2;
-
-    private SingleThreadExecutor mRenderExecutor = new SingleThreadExecutor(TAG);
-    private HandlerThreadHandler mWorkHandler = HandlerThreadHandler.createHandler(TAG, this);
-    private Camera mCamera;
-    private byte[][] mPreviewBuffers;
-
+public class MainActivity extends ListActivity {
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
 
-        mTextureView1 = (TextureView) findViewById(R.id.textureView);
-        mTextureView1.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
+        Intent intent = getIntent();
+        String path = intent.getStringExtra("com.example.android.apis.Path");
 
-            @Override
-            public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                mTextureView1Ready = true;
-                mWorkHandler.sendEmptyMessage(MSG_ID_TEXTUREVIEW_READY);
-            }
+        if (path == null) {
+            path = "";
+        }
 
-            @Override
-            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-
-            }
-
-            @Override
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                mTextureView1Ready = false;
-                mWorkHandler.sendEmptyMessage(MSG_ID_TEXTUREVIEW_DESTROY);
-                return false;
-            }
-
-            @Override
-            public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-
-            }
-        });
-
-        mTextureView2 = (TextureView) findViewById(R.id.textureView2);
-        mTextureView2.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-
-            @Override
-            public void onSurfaceTextureAvailable(SurfaceTexture surface, int width, int height) {
-                mTextureView2Ready = true;
-                mWorkHandler.sendEmptyMessage(MSG_ID_TEXTUREVIEW_READY);
-            }
-
-            @Override
-            public void onSurfaceTextureSizeChanged(SurfaceTexture surface, int width, int height) {
-
-            }
-
-            @Override
-            public boolean onSurfaceTextureDestroyed(SurfaceTexture surface) {
-                mTextureView2Ready = true;
-
-                mWorkHandler.sendEmptyMessage(MSG_ID_TEXTUREVIEW_DESTROY);
-                return false;
-            }
-
-            @Override
-            public void onSurfaceTextureUpdated(SurfaceTexture surface) {
-
-            }
-        } );
-
-        // Example of a call to a native method
-        TextView tv = (TextView) findViewById(R.id.sample_text);
-        tv.setText(stringFromJNI(null));
+        setListAdapter(new SimpleAdapter(this, getData(path),
+                android.R.layout.simple_list_item_1, new String[] { "title" },
+                new int[] { android.R.id.text1 }));
+        getListView().setTextFilterEnabled(true);
     }
 
+    protected List<Map<String, Object>> getData(String prefix) {
+        List<Map<String, Object>> myData = new ArrayList<Map<String, Object>>();
+
+        Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
+        mainIntent.addCategory(Intent.CATEGORY_SAMPLE_CODE);
+
+        PackageManager pm = getPackageManager();
+        List<ResolveInfo> list = pm.queryIntentActivities(mainIntent, 0);
+
+        if (null == list)
+            return myData;
+
+        String[] prefixPath;
+        String prefixWithSlash = prefix;
+
+        if (prefix.equals("")) {
+            prefixPath = null;
+        } else {
+            prefixPath = prefix.split("/");
+            prefixWithSlash = prefix + "/";
+        }
+
+        int len = list.size();
+
+        Map<String, Boolean> entries = new HashMap<String, Boolean>();
+
+        for (int i = 0; i < len; i++) {
+            ResolveInfo info = list.get(i);
+            CharSequence labelSeq = info.loadLabel(pm);
+            String label = labelSeq != null
+                    ? labelSeq.toString()
+                    : info.activityInfo.name;
+
+            if (prefixWithSlash.length() == 0 || label.startsWith(prefixWithSlash)) {
+
+                String[] labelPath = label.split("/");
+
+                String nextLabel = prefixPath == null ? labelPath[0] : labelPath[prefixPath.length];
+
+                if ((prefixPath != null ? prefixPath.length : 0) == labelPath.length - 1) {
+                    addItem(myData, nextLabel, activityIntent(
+                            info.activityInfo.applicationInfo.packageName,
+                            info.activityInfo.name));
+                } else {
+                    if (entries.get(nextLabel) == null) {
+                        addItem(myData, nextLabel, browseIntent(prefix.equals("") ? nextLabel : prefix + "/" + nextLabel));
+                        entries.put(nextLabel, true);
+                    }
+                }
+            }
+        }
+
+        Collections.sort(myData, sDisplayNameComparator);
+
+        return myData;
+    }
+    private final static Comparator<Map<String, Object>> sDisplayNameComparator =
+            new Comparator<Map<String, Object>>() {
+                private final Collator collator = Collator.getInstance();
+
+                public int compare(Map<String, Object> map1, Map<String, Object> map2) {
+                    return collator.compare(map1.get("title"), map2.get("title"));
+                }
+            };
+
+    protected Intent activityIntent(String pkg, String componentName) {
+        Intent result = new Intent();
+        result.setClassName(pkg, componentName);
+        return result;
+    }
+
+    protected Intent browseIntent(String path) {
+        Intent result = new Intent();
+        result.setClass(this, MainActivity.class);
+        result.putExtra("com.example.android.apis.Path", path);
+        return result;
+    }
+
+    protected void addItem(List<Map<String, Object>> data, String name, Intent intent) {
+        Map<String, Object> temp = new HashMap<String, Object>();
+        temp.put("title", name);
+        temp.put("intent", intent);
+        data.add(temp);
+    }
 
     @Override
-    public boolean handleMessage(Message msg) {
-        switch (msg.what) {
-            case MSG_ID_TEXTUREVIEW_READY:
-                if (mTextureView1Ready && mTextureView2Ready)
-                    handleOpenCamera();
-                break;
-            case MSG_ID_TEXTUREVIEW_DESTROY:
-                if (!mTextureView1Ready || !mTextureView2Ready)
-                    handleCloseCamera();
-                break;
-        }
-        return false;
+    @SuppressWarnings("unchecked")
+    protected void onListItemClick(ListView l, View v, int position, long id) {
+        Map<String, Object> map = (Map<String, Object>)l.getItemAtPosition(position);
+
+        Intent intent = new Intent((Intent) map.get("intent"));
+        intent.addCategory(Intent.CATEGORY_SAMPLE_CODE);
+        startActivity(intent);
     }
-
-    private void handleOpenCamera() {
-        if (mCamera != null)
-            handleCloseCamera();
-
-        mCamera = Camera.open(0);
-
-        Camera.Parameters parameters = mCamera.getParameters();
-
-        getOptimalPreviewSize(parameters.getSupportedPreviewSizes(), mPreviewWidth, mPreviewHeight);
-        parameters.setPreviewSize(mPreviewWidth, mPreviewHeight);
-        parameters.setPreviewFormat(ImageFormat.NV21);
-        mCamera.setParameters(parameters);
-
-        int bufSize = mPreviewWidth * mPreviewHeight * ImageFormat.getBitsPerPixel(ImageFormat.NV21) / 8;
-        mPreviewBuffers = new byte[2][bufSize];
-
-        for (byte[] buf : mPreviewBuffers) {
-            mCamera.addCallbackBuffer(buf);
-        }
-        mCamera.setPreviewCallbackWithBuffer(this);
-
-        try {
-            mCamera.setPreviewTexture(mTextureView1.getSurfaceTexture());
-        } catch (IOException e) {
-            Log.e(TAG, "setPreviewTexture exception", e);
-        }
-        mCamera.startPreview();
-
-        mDisplaySurface = new Surface(mTextureView2.getSurfaceTexture());
-        mRenderHandler = nativeRenderInit(mDisplaySurface, mPreviewWidth, mPreviewHeight);
-        Log.d(TAG, "mRenderHandler = " + mRenderHandler);
-    }
-
-    private void handleCloseCamera() {
-        if (mCamera == null)
-            return;
-
-        Log.d(TAG, "handleCloseCamera: mRenderHandler = " + mRenderHandler);
-        if (mRenderHandler != 0) {
-            nativeRenderRelease(mRenderHandler);
-            mRenderHandler = 0;
-        }
-
-        mCamera.setPreviewCallbackWithBuffer(null);
-        mCamera.stopPreview();
-        mCamera.release();
-        mCamera = null;
-        Log.d(TAG, "camera closed");
-    }
-
-    private Object mBufferSync = new Object();
-    private boolean mReady = true;
-
-    @Override
-    public void onPreviewFrame(final byte[] data, Camera camera) {
-        Log.d(TAG, "onPreviewFrame: len = " + data.length);
-
-        synchronized (mBufferSync) {
-            if (!mReady) {
-                mCamera.addCallbackBuffer(data);
-                return;
-            }
-
-            mReady = false;
-        }
-
-        mWorkHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                if (mRenderHandler != 0) {
-                    int ret = nativeRender(mRenderHandler, data, data.length, UVC_FRAME_FORMAT_NV21);
-
-                    Log.d(TAG, "nativeRender: ret = " + ret);
-                }
-
-                if (mCamera != null)
-                    mCamera.addCallbackBuffer(data);
-
-                synchronized (mBufferSync) {
-                    mReady = true;
-                }
-            }
-        });
-    }
-
-    public void getOptimalPreviewSize(List<Camera.Size> previewSizes, int w, int h) {
-        final double ASPECT_TOLERANCE = 0.1;
-        double targetRatio = (double) w / h;
-        Camera.Size optimalSize = null;
-        double minDiff = Double.MAX_VALUE;
-
-        int targetHeight = h;
-
-        for (Camera.Size size : previewSizes) {
-            double ratio = (double) size.width / size.height;
-            if (Math.abs(ratio - targetRatio) > ASPECT_TOLERANCE)
-                continue;
-            if (Math.abs(size.height - targetHeight) < minDiff) {
-                optimalSize = size;
-                minDiff = Math.abs(size.height - targetHeight);
-            }
-        }
-
-        if (optimalSize == null) {
-            minDiff = Double.MAX_VALUE;
-            for (Camera.Size size : previewSizes) {
-                if (Math.abs(size.height - targetHeight) < minDiff) {
-                    optimalSize = size;
-                    minDiff = Math.abs(size.height - targetHeight);
-                }
-            }
-        }
-
-        mPreviewWidth = optimalSize.width;
-        mPreviewHeight = optimalSize.height;
-    }
-
-    // Used to load the 'native-lib' library on application startup.
-    static {
-        System.loadLibrary("native-lib");
-    }
-
-    /**
-     * A native method that is implemented by the 'native-lib' native library,
-     * which is packaged with this application.
-     */
-    public native String stringFromJNI(FileDescriptor fileDescriptor);
-
-    /**
-     * @return handle of the surface
-     *
-     * */
-    public static final native long nativeRenderInit(Surface surface, int width, int height);
-
-    public static final native void nativeRenderRelease(final long handle);
-
-    public static native int nativeRender(final long handle, final byte[] yuv, final int yuvSize, final int format);
-
 }

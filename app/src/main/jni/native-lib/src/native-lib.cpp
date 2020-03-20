@@ -8,7 +8,7 @@
 
 extern "C"
 JNIEXPORT jstring JNICALL
-Java_com_joseth_demo_MainActivity_stringFromJNI(JNIEnv *env, jobject instance,
+Java_com_joseth_demo_camera_CameraPreview_stringFromJNI(JNIEnv *env, jobject instance,
                                                          jobject fileDescriptor) {
 
     // TODO
@@ -19,7 +19,7 @@ Java_com_joseth_demo_MainActivity_stringFromJNI(JNIEnv *env, jobject instance,
 
 extern "C"
 JNIEXPORT jlong JNICALL
-Java_com_joseth_demo_MainActivity_nativeRenderInit(JNIEnv *env, jclass type,
+Java_com_joseth_demo_camera_CameraPreview_nativeRenderInit(JNIEnv *env, jclass type,
                                                             jobject surface, jint width,
                                                             jint height) {
     ANativeWindow *window = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
@@ -35,7 +35,7 @@ Java_com_joseth_demo_MainActivity_nativeRenderInit(JNIEnv *env, jclass type,
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_com_joseth_demo_MainActivity_nativeRenderRelease(JNIEnv *env, jclass type,
+Java_com_joseth_demo_camera_CameraPreview_nativeRenderRelease(JNIEnv *env, jclass type,
                                                                jlong handle) {
 
     SurfaceRender *render = reinterpret_cast<SurfaceRender *>(handle);
@@ -46,7 +46,7 @@ Java_com_joseth_demo_MainActivity_nativeRenderRelease(JNIEnv *env, jclass type,
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_com_joseth_demo_MainActivity_nativeRender(JNIEnv *env, jclass type, jlong handle,
+Java_com_joseth_demo_camera_CameraPreview_nativeRender(JNIEnv *env, jclass type, jlong handle,
                                                         jbyteArray yuv_, jint yuvSize, jint format) {
     int ret = -1;
     jbyte *yuv = env->GetByteArrayElements(yuv_, NULL);
