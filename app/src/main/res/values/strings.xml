@@ -13,4 +13,8 @@
     <string name="activity_camera_preview">Camera/Preview</string>
 
     <string name="activity_mock_audio_call">Audio/MockAudioCall</string>
+    <string name="bluetooth_state">BT state:</string>
+    <string name="force_sco_on">Force SCO On:</string>
+    <string name="voice_dialer">Voice Dialer:</string>
+    <string name="audio_mode">Audio mode:</string>
 </resources>
