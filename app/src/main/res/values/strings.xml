@@ -4,9 +4,13 @@
     <string name="notifyMsg">Permission</string>
     <string name="cancel">Cancel</string>
     <string name="setting">Settings</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
 
     <string name="activity_hello_world">App/Activity/HelloWord</string>
     <string name="hello_world">Hello, world!</string>
 
     <string name="activity_camera_preview">Camera/Preview</string>
+
+    <string name="activity_mock_audio_call">Audio/MockAudioCall</string>
 </resources>

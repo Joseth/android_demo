@@ -1,5 +1,6 @@
 package com.joseth.demo.camera;
 
+import android.Manifest;
 import android.graphics.ImageFormat;
 import android.graphics.SurfaceTexture;
 import android.hardware.Camera;
@@ -46,6 +47,17 @@ public class CameraPreview extends CheckPermissionsActivity implements Handler.C
     private HandlerThreadHandler mWorkHandler = HandlerThreadHandler.createHandler(TAG, this);
     private Camera mCamera;
     private byte[][] mPreviewBuffers;
+
+    protected String[] needPermissions = {
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.CAMERA
+    };
+
+    @Override
+    protected String[] getNeedPermissions() {
+        return needPermissions;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {

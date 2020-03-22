@@ -1,6 +1,5 @@
 package com.joseth.demo;
 
-import android.Manifest;
 import android.annotation.TargetApi;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
@@ -17,15 +16,13 @@ import java.util.List;
 
 public class CheckPermissionsActivity extends AppCompatActivity {
 
-    protected String[] needPermissions = {
-            Manifest.permission.WRITE_EXTERNAL_STORAGE,
-            Manifest.permission.READ_EXTERNAL_STORAGE,
-            Manifest.permission.CAMERA
-    };
-
     private static final int PERMISSON_REQUESTCODE = 0;
 
     private boolean isNeedCheck = true;
+
+    protected String[] getNeedPermissions() {
+        return null;
+    }
 
     @Override
     protected void onResume() {
@@ -34,14 +31,16 @@ public class CheckPermissionsActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
                 && getApplicationInfo().targetSdkVersion >= Build.VERSION_CODES.M) {
             if (isNeedCheck) {
-                checkPermissions(needPermissions);
+                final String []permissions = getNeedPermissions();
+                if (permissions != null && permissions.length > 0)
+                    checkPermissions(permissions);
             }
         } else {
             onAllPermissionGranted();
         }
     }
 
-    private void checkPermissions(String[] permissions) {
+    private void checkPermissions(final String[] permissions) {
         try {
             List<String> deniedList = findDeniedPermissions(permissions);
 
@@ -56,7 +55,7 @@ public class CheckPermissionsActivity extends AppCompatActivity {
         }
     }
 
-    private List<String> findDeniedPermissions(String[] permissions) {
+    private List<String> findDeniedPermissions(final String[] permissions) {
         List<String> deniedList = new ArrayList<String>();
 
         try {
