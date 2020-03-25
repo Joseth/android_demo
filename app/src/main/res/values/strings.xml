@@ -17,4 +17,8 @@
     <string name="force_sco_on">Force SCO On:</string>
     <string name="voice_dialer">Voice Dialer:</string>
     <string name="audio_mode">Audio mode:</string>
+    <string name="stream_type">Stream type:</string>
+    <string name="audio_track">Audio track</string>
+    <string name="audio_recorder">Audio recorder</string>
+
 </resources>

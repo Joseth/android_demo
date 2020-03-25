@@ -14,7 +14,6 @@ import android.media.AudioManager;
 import android.media.AudioRecord;
 import android.media.AudioTrack;
 import android.media.MediaRecorder;
-import android.nfc.tech.TagTechnology;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Process;
@@ -23,9 +22,9 @@ import android.view.View;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.Spinner;
 import android.widget.Switch;
-import android.widget.TextView;
 
 import com.joseth.demo.CheckPermissionsActivity;
 import com.joseth.demo.R;
@@ -40,10 +39,9 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.List;
 
-public class MockAudioCall extends CheckPermissionsActivity {
+public class MockAudioCall extends CheckPermissionsActivity implements View.OnClickListener {
     private static final String TAG = "MockAudioCall";
 
-    private static final int STREAM_TYPE = 6; /* STREAM_BLUETOOTH_SCO */
     private static final int RECORDING_RATE = 8000; // can go up to 44K, if needed
     private static final int CHANNEL_IN = AudioFormat.CHANNEL_IN_MONO;
     private static final int CHANNELS_OUT = AudioFormat.CHANNEL_OUT_MONO;
@@ -56,6 +54,8 @@ public class MockAudioCall extends CheckPermissionsActivity {
     private Switch mSwitchScoOn;
     private Switch mSwitchVoiceDialer;
     private Spinner mSpinnerMode;
+    private CheckBox mCbTrack;
+    private CheckBox mCbRecorder;
 
     private BluetoothHeadsetInfo mBtHeadsetInfo;
 
@@ -67,18 +67,35 @@ public class MockAudioCall extends CheckPermissionsActivity {
     private File mPlayFile;
 
     private AudioManager mAudioManager;
-    private boolean mForceScoOn;
+    private boolean mForceScoOn = false;
 
     private static final String[] mModeStrings = {
             "NORMAL", "RINGTONE", "IN_CALL", "IN_COMMUNICATION"
     };
     private int mCurrentMode;
 
+    private static final String[] mStreamTypeItems = {
+        "VOICE_CALL",
+        "SYSTEM",
+        "RING",
+        "MUSIC",
+        "ALARM",
+        "NOTIFICATION",
+        "BLUETOOTH_SCO",
+        "SYSTEM_ENFORCED",
+        "DTMF",
+        "TTS",
+        "ACCESSIBILITY"
+    };
+    private int mStreamType = 6; /* STREAM_BLUETOOTH_SCO */
+    private Spinner mSpinnerStreamType;
+
     protected String[] needPermissions = {
             Manifest.permission.WRITE_EXTERNAL_STORAGE,
             Manifest.permission.READ_EXTERNAL_STORAGE,
             Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.BLUETOOTH
+            Manifest.permission.BLUETOOTH,
+            Manifest.permission.MODIFY_AUDIO_SETTINGS
     };
 
     protected String[] getNeedPermissions() {
@@ -92,39 +109,20 @@ public class MockAudioCall extends CheckPermissionsActivity {
 
         mAudioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
 
-        mBtnToggle = findViewById(R.id.btn_toggle);
-        mBtnToggle.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                synchronized (mStopLocker) {
-                    if (mRequestStop) {
-                        start();
-                    } else {
-                        stop();
-                    }
-                    mBtnToggle.setText(mRequestStop ? R.string.start : R.string.stop);
-                }
-            }
-        });
 
-        setVolumeControlStream(STREAM_TYPE);
+        mBtnToggle = findViewById(R.id.btn_toggle);
+        mBtnToggle.setOnClickListener(this);
+        mCbTrack = findViewById(R.id.checkbox_track);
+        mCbRecorder = findViewById(R.id.checkbox_recorder);
 
         mSwitchBtState = findViewById(R.id.bt_switch);
-        mSwitchScoOn = findViewById(R.id.switch_force_sco_on);
-        mSwitchScoOn.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                mBtHeadsetInfo.setForceScoOn(mSwitchScoOn.isChecked());
-            }
-        });
-        mSwitchVoiceDialer = findViewById(R.id.switch_voice_dialer);
-        mSwitchVoiceDialer.setOnClickListener(new View.OnClickListener() {
+        mSwitchBtState.setOnClickListener(this);
 
-            @Override
-            public void onClick(View v) {
-                mBtHeadsetInfo.setVoiceDialOn(mSwitchVoiceDialer.isChecked());
-            }
-        });
+        mSwitchScoOn = findViewById(R.id.switch_force_sco_on);
+        mSwitchScoOn.setOnClickListener(this);
+
+        mSwitchVoiceDialer = findViewById(R.id.switch_voice_dialer);
+        mSwitchVoiceDialer.setOnClickListener(this);
 
         mBtHeadsetInfo = new BluetoothHeadsetInfo();
         mBtHeadsetInfo.init();
@@ -138,14 +136,21 @@ public class MockAudioCall extends CheckPermissionsActivity {
         mCurrentMode = mAudioManager.getMode();
         mSpinnerMode.setSelection(mCurrentMode);
 
+        mSpinnerStreamType = findViewById(R.id.spinner_stream_type);
+        ArrayAdapter<String> adapterStream = new ArrayAdapter<String>(this,
+                android.R.layout.simple_spinner_item, mStreamTypeItems);
+        adapterStream.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        mSpinnerStreamType.setAdapter(adapterStream);
+        mSpinnerStreamType.setOnItemSelectedListener(mStreamTypeChanged);
+        mStreamType = 6;
+        mSpinnerStreamType.setSelection(mStreamType);
+        setVolumeControlStream(mStreamType);
+
         File outDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC);
         if (outDir.exists())
             outDir.mkdirs();
         mPlayFile = new File(outDir, PLAY_FILE_NAME);
         mRecordFile = new File(outDir, RECORD_FILE_NAME);
-
-        mRecordTask = new AudioRecorderTask(mRecordFile);
-        mTrackTask = new AudioTrackTask(mPlayFile);
     }
 
     @Override
@@ -166,8 +171,15 @@ public class MockAudioCall extends CheckPermissionsActivity {
         if (mRecordFile.exists())
             mRecordFile.renameTo(mPlayFile);
 
-        mRecordTask.startTask();
-        mTrackTask.startTask();
+        if (mCbRecorder.isChecked()) {
+            mRecordTask = new AudioRecorderTask(mRecordFile);
+            mRecordTask.startTask();
+        }
+
+        if (mCbTrack.isChecked()) {
+            mTrackTask = new AudioTrackTask(mPlayFile);
+            mTrackTask.startTask();
+        }
     }
 
     private void stop() {
@@ -180,8 +192,14 @@ public class MockAudioCall extends CheckPermissionsActivity {
             mRequestStop = true;    // for rejecting newer frame
         }
 
-        mTrackTask.stopTask();
-        mRecordTask.stopTask();
+        if (mTrackTask != null) {
+            mTrackTask.stopTask();
+            mTrackTask = null;
+        }
+        if (mRecordTask != null) {
+            mRecordTask.stopTask();
+            mRecordTask = null;
+        }
     }
 
     private AdapterView.OnItemSelectedListener mModeChanged = new AdapterView.OnItemSelectedListener() {
@@ -200,6 +218,70 @@ public class MockAudioCall extends CheckPermissionsActivity {
 
         }
     };
+
+    private AdapterView.OnItemSelectedListener mStreamTypeChanged = new AdapterView.OnItemSelectedListener() {
+        @Override
+        public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+            if (mStreamType != position) {
+                mStreamType = position;
+                setVolumeControlStream(mStreamType);
+                Mlog.d(TAG, "StreamTypeChanged: " + parent.getSelectedItem());
+            }
+        }
+
+        @Override
+        public void onNothingSelected(AdapterView<?> parent) {
+
+        }
+    };
+
+    @Override
+    public void onClick(View v) {
+        switch (v.getId()) {
+            case R.id.bt_switch:
+
+                break;
+            case R.id.switch_force_sco_on:
+                mBtHeadsetInfo.setForceScoOn(mSwitchScoOn.isChecked());
+                if (mSwitchScoOn.isChecked()) {
+                    /**  Even if a SCO connection is established, the following restrictions apply
+                     *   on audio output streams so that they can be routed to SCO headset:
+                     *          the stream type must be STREAM_VOICE_CALL
+                     *          the format must be mono
+                     *          the sampling must be 16kHz or 8kHz
+                     *  The following restrictions apply on input streams:
+                     *          the format must be mono
+                     *          the sampling must be 8kHz
+                     */
+                    mSpinnerStreamType.setSelection(AudioManager.STREAM_VOICE_CALL);
+                }
+                break;
+            case R.id.switch_voice_dialer:
+                mBtHeadsetInfo.setVoiceDialOn(mSwitchVoiceDialer.isChecked());
+                break;
+            case R.id.btn_toggle:
+                synchronized (mStopLocker) {
+                    if (mRequestStop) {
+                        start();
+                    } else {
+                        stop();
+                    }
+                    mBtnToggle.setText(mRequestStop ? R.string.start : R.string.stop);
+                }
+                break;
+        }
+    }
+
+    private void onBtStateChanged() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                BluetoothAdapter btAdapter = BluetoothAdapter.getDefaultAdapter();
+
+                mSwitchBtState.setChecked(btAdapter.isEnabled());
+            }
+        });
+    }
 
     class AudioTrackTask extends Thread {
         private static final String TAG = "AudioTrackTask";
@@ -225,7 +307,7 @@ public class MockAudioCall extends CheckPermissionsActivity {
             AudioTrack audioTrack;
             final int intSize = AudioTrack.getMinBufferSize(RECORDING_RATE, CHANNELS_OUT, PCM_FORMAT);
 
-            audioTrack = new AudioTrack(STREAM_TYPE,
+            audioTrack = new AudioTrack(mStreamType,
                     RECORDING_RATE,
                     CHANNELS_OUT,
                     PCM_FORMAT,
@@ -247,6 +329,7 @@ public class MockAudioCall extends CheckPermissionsActivity {
             FileInputStream in = null;
             BufferedInputStream bis = null;
             int read;
+            int write;
 
             in = new FileInputStream(mPlayFile);
             bis = new BufferedInputStream(in);
@@ -261,8 +344,12 @@ public class MockAudioCall extends CheckPermissionsActivity {
                     }
 
                     if ((read = bis.read(buffer, 0, buffer.length)) > 0) {
-                        audioTrack.write(buffer, 0, read);
                         Mlog.v(TAG, "read " + read);
+                        write = audioTrack.write(buffer, 0, read);
+                        Mlog.v(TAG, "write " + write);
+                        cnt++;
+                    } else {
+                        break;
                     }
                 }
             } finally {
@@ -319,6 +406,7 @@ public class MockAudioCall extends CheckPermissionsActivity {
         }
 
         private final int[] AUDIO_SOURCES = new int[]{
+                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 MediaRecorder.AudioSource.MIC,
                 MediaRecorder.AudioSource.CAMCORDER,
                 MediaRecorder.AudioSource.DEFAULT,
@@ -380,6 +468,9 @@ public class MockAudioCall extends CheckPermissionsActivity {
                         bos.write(buf, 0, readBytes);
                         cnt++;
                         Mlog.v(TAG, "read: " + readBytes);
+                    } else {
+                        Mlog.w(TAG, "read failed: readBytes = " + readBytes);
+                        break;
                     }
                 }
             } finally {
@@ -430,6 +521,9 @@ public class MockAudioCall extends CheckPermissionsActivity {
                         } else {
                             mBluetoothHeadsetDevice = null;
                         }
+
+                        onBtStateChanged();
+                        Mlog.d(TAG, "BluetoothProfile.onServiceConnected: size = " + deviceList.size());
                     }
                     @Override
                     public void onServiceDisconnected(int profile) {
@@ -439,6 +533,7 @@ public class MockAudioCall extends CheckPermissionsActivity {
                                 mBluetoothHeadsetDevice = null;
                             }
                             mBluetoothHeadset = null;
+                            Mlog.d(TAG, "BluetoothProfile.onServiceDisconnected");
                         }
                     }
                 };
@@ -452,8 +547,8 @@ public class MockAudioCall extends CheckPermissionsActivity {
                         BluetoothProfile.HEADSET);
             }
 
-            IntentFilter intentFilter =
-                    new IntentFilter(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED);
+            IntentFilter intentFilter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+            intentFilter.addAction(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED);
             intentFilter.addAction(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED);
             registerReceiver(this, intentFilter);
 
@@ -473,6 +568,8 @@ public class MockAudioCall extends CheckPermissionsActivity {
                 return;
 
             if (mBluetoothHeadset != null && mBluetoothHeadsetDevice != null) {
+                Mlog.d(TAG, "setVoiceDialOn: " + mVoiceDialerOn + " => " + on);
+
                 if (on) {
                     mBluetoothHeadset.startVoiceRecognition(mBluetoothHeadsetDevice);
                 } else {
@@ -485,6 +582,7 @@ public class MockAudioCall extends CheckPermissionsActivity {
         void setForceScoOn(boolean scoOn) {
             if (mForceScoOn == scoOn)
                 return;
+            Mlog.d(TAG, "setForceScoOn: " + mForceScoOn + " => " + scoOn);
 
             if (scoOn) {
                 mAudioManager.startBluetoothSco();
@@ -498,10 +596,18 @@ public class MockAudioCall extends CheckPermissionsActivity {
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
 
-            if (action.equals(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED)) {
+            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
                 int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
                 int prevState = intent.getIntExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, -1);
-                Mlog.d(TAG, "ACTION_AUDIO_STATE_CHANGED: " +prevState + " => "+ state);
+                onBtStateChanged();
+                Mlog.d(TAG, "ACTION_STATE_CHANGED: state :" +prevState + " => "+ state);
+            } else if (action.equals(BluetoothHeadset.ACTION_AUDIO_STATE_CHANGED)) {
+                int state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
+                int prevState = intent.getIntExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, -1);
+                BluetoothDevice btDevice = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE);
+
+                Mlog.d(TAG, "ACTION_AUDIO_STATE_CHANGED: Name: " + btDevice.getName()
+                        + ", state :" +prevState + " => "+ state);
             } else if (action.equals(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)) {
                 int currentState = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, -1);
                 int prevState = intent.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_PREVIOUS_STATE, -1);

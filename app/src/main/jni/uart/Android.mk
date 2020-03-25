@@ -1,11 +1,11 @@
 LOCAL_PATH	:= $(call my-dir)
 COMMON_DIR := $(call my-dir)/../common
+
 include $(CLEAR_VARS)
 
 LOCAL_SRC_FILES := \
-        src/native-lib.cpp	\
-        src/SurfaceRender.cpp	\
-        src/yuv_utils.c
+        src/uart.c	\
+        src/uart_echo.c
 
 LOCAL_C_INCLUDES := \
     $(COMMON_DIR)/include   \
@@ -13,6 +13,6 @@ LOCAL_C_INCLUDES := \
 
 LOCAL_LDLIBS := -llog
 LOCAL_LDLIBS += -landroid
-LOCAL_MODULE:= native-lib
-include $(BUILD_SHARED_LIBRARY)
+LOCAL_MODULE:= uart_echo
+include $(BUILD_EXECUTABLE)
 

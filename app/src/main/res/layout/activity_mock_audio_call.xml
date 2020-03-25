@@ -4,6 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:orientation="vertical"
     tools:context=".audio.MockAudioCall">
 
     <LinearLayout
@@ -73,11 +74,45 @@
             android:gravity="right"/>
     </LinearLayout>
 
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_margin="20dp">
+        <TextView
+            android:layout_width="100dp"
+            android:layout_height="wrap_content"
+            android:text="@string/stream_type"/>
+        <Spinner
+            android:id="@+id/spinner_stream_type"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:gravity="right"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+        <CheckBox
+            android:id="@+id/checkbox_track"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/audio_track"/>
+        <CheckBox
+            android:id="@+id/checkbox_recorder"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/audio_recorder"/>
+    </LinearLayout>
     <Button
         android:id="@+id/btn_toggle"
         android:layout_width="100dp"
         android:layout_height="50dp"
         android:text="@string/start"
-        android:layout_gravity="center"/>
+        android:layout_gravity="center_horizontal"/>
 
 </LinearLayout>
